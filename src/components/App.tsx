@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { WebSocketProvider } from '@/lib/WebSocketContext';
 import { LoginForm } from './LoginForm';
-import { MainEditor } from './MainEditor';
+import { TabsContainer } from './TabsContainer';
 
 export const App: React.FC = () => {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export const App: React.FC = () => {
       {!isAuthenticated ? (
         <LoginForm onLoginSuccess={() => setIsAuthenticated(true)} />
       ) : (
-        <MainEditor />
+        <TabsContainer />
       )}
     </WebSocketProvider>
   );
