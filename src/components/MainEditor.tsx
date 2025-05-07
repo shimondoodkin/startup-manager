@@ -40,6 +40,10 @@ export const MainEditor: React.FC = () => {
   const handleCloseTab = (index: number) => {
     if (index === 0) return; // Don't close the main list tab
     
+    // Get the tab that's being closed
+    const tabToClose = tabs[index];
+    
+    // Filter out the closed tab
     const newTabs = tabs.filter((_, i) => i !== index);
     setTabs(newTabs);
     

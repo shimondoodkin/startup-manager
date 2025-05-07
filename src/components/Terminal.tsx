@@ -27,8 +27,6 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTerminals, setActiveTerminals] = useState<TerminalSessionInfo[]>([]);
-  const [showTerminalList, setShowTerminalList] = useState(false);
   const { isAuthenticated, client } = useWebSocket();
 
   // Initialize terminal
@@ -69,8 +67,7 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
           setTerminal(existingInstance.term);
           setSocket(existingInstance.socket);
           setIsConnected(true);
-          setActiveTerminals(TerminalManager.getActiveTerminals());
-          
+      
           // Reattach the terminal to the DOM
           if (terminalRef.current && existingInstance.term.term) {
             // Check if we have a saved element in the instance
@@ -323,13 +320,6 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       term.writeln('\r\n\x1b[1;32mTerminal session established\x1b[0m\r\n');
     });
     
-    socket.on('active_terminals', (terminals: TerminalSessionInfo[]) => {
-      console.log('Received active terminals list:', terminals);
-      setActiveTerminals(terminals);
-      // Also store in the TerminalManager
-      TerminalManager.setActiveTerminals(terminals);
-    });
-    
     socket.on('disconnect', () => {
       console.log(`Terminal WebSocket disconnected`);
       setIsConnected(false);
@@ -361,7 +351,6 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
     
     // Request to attach to the selected screen
     socket.emit('attach', { screenName });
-    setShowTerminalList(false);
     
     // Update the terminal instance in the manager
     const terminalKey = standalone ? 'standalone' : program?.screenName || '';
@@ -386,33 +375,8 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
           {!standalone && program && <p className="text-xs text-gray-500 ml-2">Screen: {program.screenName}</p>}
           
           <div className="relative ml-4">
-            <button 
-              onClick={() => setShowTerminalList(!showTerminalList)}
-              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Terminals ({activeTerminals.length})
-            </button>
-            
-            {showTerminalList && activeTerminals.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg z-10 w-64">
-                <div className="p-2 border-b text-xs font-semibold">Active Terminals</div>
-                <ul className="max-h-48 overflow-y-auto">
-                  {activeTerminals.map(term => (
-                    <li 
-                      key={term.id}
-                      className="p-2 hover:bg-gray-100 cursor-pointer text-xs border-b flex justify-between items-center"
-                      onClick={() => switchToTerminal(term.screenName)}
-                    >
-                      <div>
-                        <div className="font-medium">{term.title}</div>
-                        <div className="text-gray-500">{term.screenName}</div>
-                      </div>
-                      <div className="text-gray-400 text-xs">{formatDate(term.createdAt)}</div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+                      
+         
           </div>
         </div>
         <button 

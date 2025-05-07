@@ -17,7 +17,6 @@ export interface TerminalInstance {
 // Singleton class to manage terminal instances
 class TerminalManagerClass {
   private instances: Map<string, TerminalInstance> = new Map();
-  private activeTerminals: TerminalSessionInfo[] = [];
 
   // Create or get a terminal instance
   getOrCreateInstance(screenName: string, standalone: boolean = false): TerminalInstance {
@@ -59,16 +58,6 @@ class TerminalManagerClass {
   // Remove a terminal instance
   removeInstance(key: string): boolean {
     return this.instances.delete(key);
-  }
-
-  // Store active terminals list
-  setActiveTerminals(terminals: TerminalSessionInfo[]): void {
-    this.activeTerminals = terminals;
-  }
-
-  // Get active terminals list
-  getActiveTerminals(): TerminalSessionInfo[] {
-    return this.activeTerminals;
   }
 
   // Clean up old instances (can be called periodically)

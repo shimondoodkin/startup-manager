@@ -76,9 +76,6 @@ export class TerminalServer {
       // Send initial connection success message
       socket.emit('output', '\r\n\x1b[1;32mTerminal connected with token authentication. Waiting for screen attachment...\x1b[0m\r\n');
 
-      // Send list of active terminal sessions
-      this.sendActiveTerminals(socket);
-
       socket.on('attach', (data: { screenName?: string, standalone?: boolean }) => {
         console.log(`Attach request received:`, data);
 
@@ -92,13 +89,14 @@ export class TerminalServer {
         }
       });
 
-      socket.on('list_terminals', () => {
-        this.sendActiveTerminals(socket);
-      });
-
       socket.on('input', (data: string) => {
         console.log(`Input received from client ${socket.id}: ${data.length} bytes`);
         this.handleInput(socket.id, data);
+      });
+
+      socket.on('close_terminal', () => {
+        console.log(`Explicit terminal close request from client ${socket.id}`);
+        this.handleDisconnect(socket.id);
       });
 
       socket.on('disconnect', () => {
@@ -108,18 +106,6 @@ export class TerminalServer {
     });
   }
 
-  private sendActiveTerminals(socket: Socket) {
-    const activeTerminals: TerminalSessionInfo[] = Array.from(this.sessions.values()).map(session => ({
-      id: session.id,
-      screenName: session.screenName,
-      title: session.title,
-      createdAt: session.createdAt.toISOString(),
-      type: session.type
-    }));
-
-    console.log(`Sending ${activeTerminals.length} active terminals to client ${socket.id}`);
-    socket.emit('active_terminals', activeTerminals);
-  }
 
   private attachToStandaloneTerminal(socket: Socket) {
     try {
@@ -165,9 +151,6 @@ export class TerminalServer {
       // Notify client of successful connection
       socket.emit('connected', { sessionId, standalone: true });
       console.log(`Client ${socket.id} attached to standalone terminal`);
-
-      // Broadcast updated terminal list
-      this.broadcastActiveTerminals();
 
     } catch (error) {
       console.error(`Error creating standalone terminal: ${error}`);
@@ -220,9 +203,6 @@ export class TerminalServer {
       socket.emit('connected', { sessionId, screenName });
       console.log(`Client ${socket.id} attached to terminal for screen ${screenName}`);
 
-      // Broadcast updated terminal list
-      this.broadcastActiveTerminals();
-
     } catch (error) {
       console.error(`Error attaching to screen: ${error}`);
       socket.emit('error', `Failed to attach to screen: ${error}`);
@@ -249,25 +229,7 @@ export class TerminalServer {
         console.log(`Killed pty process for client ${socketId}`);
       }
       this.sessions.delete(socketId);
-
-      // Broadcast updated terminal list to all clients
-      setTimeout(() => {
-        this.broadcastActiveTerminals();
-      }, 100);
     }
-  }
-
-  private broadcastActiveTerminals() {
-    const activeTerminals: TerminalSessionInfo[] = Array.from(this.sessions.values()).map(session => ({
-      id: session.id,
-      screenName: session.screenName,
-      title: session.title,
-      createdAt: session.createdAt.toISOString(),
-      type: session.type
-    }));
-
-    console.log(`Broadcasting ${activeTerminals.length} active terminals to all clients`);
-    this.io.emit('active_terminals', activeTerminals);
   }
 
   async shutdown() {
