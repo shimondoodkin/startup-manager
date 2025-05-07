@@ -1,7 +1,8 @@
-import { Server } from 'socket.io';
+import { Server, Namespace } from 'socket.io';
 import { Program, ProgramManager, ProgramState } from './Program';
 import path from 'path';
 import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 
 // Define the RPC message types
 export interface RPCRequest {
@@ -21,23 +22,25 @@ export interface RPCNotification {
   params: any;
 }
 
+interface AuthToken {
+  token: string;
+  socketId: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 export class WebSocketServer {
-  private io: Server;
+  private io: Namespace;
   private programManager: ProgramManager;
   private monitoringInterval: NodeJS.Timeout | null = null;
   private authCredentials = {
     username: process.env.ADMIN_USERNAME || 'admin',
     password: process.env.ADMIN_PASSWORD || 'password'
   };
+  private authTokens: AuthToken[] = [];
   
-  constructor(server: any) {
-    this.io = new Server(server, {
-      path: '/api/programs/socket.io',
-      cors: {
-        origin: '*',
-        methods: ['GET', 'POST']
-      }
-    });
+  constructor(namespace: Namespace) {
+    this.io = namespace;
     
     const configPath = process.env.CONFIG_PATH || path.join(os.homedir(), '.startup-manager', 'programs.json');
     this.programManager = new ProgramManager(configPath);
@@ -49,6 +52,9 @@ export class WebSocketServer {
     
     this.setupSocketHandlers();
     this.startMonitoring();
+    
+    // Clean expired tokens every minute
+    setInterval(() => this.cleanExpiredTokens(), 60000);
   }
   
   private setupSocketHandlers() {
@@ -79,7 +85,7 @@ export class WebSocketServer {
       socket.on('rpc', async (request: RPCRequest, callback) => {
         try {
           console.log(`Received RPC request from ${socket.id}:`, request.method, request.params);
-          const result = await this.handleRPC(request);
+          const result = await this.handleRPC(request, socket.id);
           console.log(`Sending RPC response to ${socket.id}:`, request.method, result);
           callback({ id: request.id, result });
         } catch (error) {
@@ -90,11 +96,13 @@ export class WebSocketServer {
       
       socket.on('disconnect', () => {
         console.log(`Client disconnected: ${socket.id}`);
+        // Remove all tokens for this socket when it disconnects
+        this.authTokens = this.authTokens.filter(t => t.socketId !== socket.id);
       });
     });
   }
   
-  private async handleRPC(request: RPCRequest): Promise<any> {
+  private async handleRPC(request: RPCRequest, socketId: string): Promise<any> {
     const { method, params } = request;
     
     switch (method) {
@@ -150,6 +158,12 @@ export class WebSocketServer {
         if (!cmdProgram) throw new Error(`Program with id ${params.id} not found`);
         const sent = await cmdProgram.sendCommandToScreen(params.command);
         return { success: sent, state: cmdProgram.getState() };
+      
+      case 'generateTerminalToken':
+        return this.generateAuthToken(socketId);
+        
+      case 'validateTerminalToken':
+        return { valid: this.validateAuthToken(params.token) };
         
       default:
         throw new Error(`Unknown method: ${method}`);
@@ -194,6 +208,62 @@ export class WebSocketServer {
       this.monitoringInterval = null;
     }
     
-    this.io.close();
+    // Disconnect all sockets in this namespace
+    this.io.disconnectSockets(true);
+  }
+  
+  // Token management methods
+  private generateAuthToken(socketId: string): { token: string, expiresIn: number } {
+    // Generate a random token
+    const token = uuidv4();
+    const now = new Date();
+    // Token expires in 5 minutes
+    const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+    
+    // Store the token
+    this.authTokens.push({
+      token,
+      socketId,
+      createdAt: now,
+      expiresAt
+    });
+    
+    console.log(`Generated new auth token for socket ${socketId}, expires at ${expiresAt.toISOString()}`);
+    
+    // Return token and expiration time (in seconds)
+    return { 
+      token, 
+      expiresIn: Math.floor((expiresAt.getTime() - now.getTime()) / 1000)
+    };
+  }
+  
+  public validateAuthToken(token: string): boolean {
+    const now = new Date();
+    const authToken = this.authTokens.find(t => t.token === token);
+    
+    if (!authToken) {
+      console.log(`Token validation failed: token not found`);
+      return false;
+    }
+    
+    if (authToken.expiresAt < now) {
+      console.log(`Token validation failed: token expired at ${authToken.expiresAt.toISOString()}`);
+      return false;
+    }
+    
+    console.log(`Token validated successfully for socket ${authToken.socketId}`);
+    return true;
+  }
+  
+  private cleanExpiredTokens() {
+    const now = new Date();
+    const initialCount = this.authTokens.length;
+    
+    this.authTokens = this.authTokens.filter(token => token.expiresAt > now);
+    
+    const removedCount = initialCount - this.authTokens.length;
+    if (removedCount > 0) {
+      console.log(`Cleaned up ${removedCount} expired auth tokens`);
+    }
   }
 }

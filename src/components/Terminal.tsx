@@ -110,7 +110,7 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
   }, []);
   
   // Function to connect to WebSocket
-  const connectToWebSocket = (term: any) => {
+  const connectToWebSocket = async (term: any) => {
     if (!isAuthenticated || !client) {
       console.error('Cannot connect to terminal: not authenticated');
       term.writeln('\r\n\x1b[1;31mCannot connect to terminal: not authenticated\x1b[0m');
@@ -131,17 +131,27 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
     console.log(`Connecting to terminal WebSocket at ${wsUrl}`);
     term.writeln(`\r\nConnecting to ${wsUrl}...`);
     
-    // Get auth credentials from the main WebSocket client
-    const credentials = client.getAuthCredentials();
-    
-    const newSocket = io(wsUrl, {
-      path: '/api/programs/terminal/socket.io',
+    // Get a token for terminal authentication
+    let authToken;
+    try {
+      term.writeln('\r\nRequesting authentication token...');
+      const response = await client.callRPC('generateTerminalToken', {});
+      authToken = response.token;
+      term.writeln(`\r\n\x1b[1;32mObtained authentication token (expires in ${response.expiresIn}s)\x1b[0m`);
+    } catch (error) {
+      console.error('Failed to get authentication token:', error);
+      term.writeln('\r\n\x1b[1;31mFailed to get authentication token: ' + error + '\x1b[0m');
+      return;
+    }
+
+    const newSocket = io(wsUrl + '/terminal', {
+      path: '/api/programs/socket.io',
       query: {
         screenName: standalone ? 'standalone' : program?.screenName,
         sessionId: Date.now().toString(),
         standalone: standalone ? 'true' : 'false'
       },
-      auth: credentials || { username: 'admin', password: 'admin' },
+      auth: { token: authToken },
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000
