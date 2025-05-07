@@ -5,6 +5,16 @@
     "command": "nano test.txt",
     "screenName": "nano",
     "maxChildDepth": 1,
-    "autoStart": false
+    "autoStart": false,
+    "stopMethod": "SIGHUP"
+  },
+  {
+    "id": "015e22ac-f118-4b0d-8869-4d551c6af3f8",
+    "name": "nano2",
+    "command": "nano test2.txt",
+    "screenName": "nano2",
+    "maxChildDepth": 1,
+    "autoStart": false,
+    "stopMethod": "SIGHUP"
   }
 ]
