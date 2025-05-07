@@ -6,22 +6,45 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "server": "ts-node --project tsconfig.server.json src/server.ts",
+    "dev:server": "nodemon --exec ts-node --project tsconfig.server.json src/server.ts",
+    "build:server": "tsc --project tsconfig.server.json",
+    "start:prod": "NODE_ENV=production node dist/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
+    "next": "15.3.1",
+    "node-pty": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "next": "15.3.1"
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "tree-kill": "^1.2.2",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.2",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-web-links": "^0.9.0"
   },
   "devDependencies": {
-    "typescript": "^5",
-    "@types/node": "^20",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.17.38",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
-    "@eslint/eslintrc": "^3"
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "nodemon": "^3.1.10",
+    "tailwindcss": "^4",
+    "ts-jest": "^29.3.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
   }
 }

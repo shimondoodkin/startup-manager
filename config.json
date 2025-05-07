@@ -1,0 +1,10 @@
+[
+  {
+    "id": "96dc0fc1-2cc8-43a7-857d-80d8bc954f7a",
+    "name": "nano",
+    "command": "nano test.txt",
+    "screenName": "nano",
+    "maxChildDepth": 1,
+    "autoStart": false
+  }
+]

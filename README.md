@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Startup Manager
 
-## Getting Started
+A Next.js application for managing and monitoring programs running on your server with screen session integration.
 
-First, run the development server:
+## Features
+
+- Web-based management of services and programs
+- Run programs in named screen sessions
+- Monitor program status in real-time
+- Start, stop, and terminate programs
+- Connect to program terminals through the web interface
+- WebSocket-based RPC API for real-time communications
+- Authentication system to secure access
+
+## Requirements
+
+- Node.js 18+ and npm
+- Linux system with screen installed
+- Modern web browser
+
+## Setup
+
+1. Clone the repository:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd startup-manager
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Create a `.env` file in the project root with the following variables:
 
-## Learn More
+```
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=yourSecurePassword
+CONFIG_PATH=/path/to/config/directory/programs.json
+PORT=3000
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Running the Application
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Development Mode
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+To run the application in development mode with hot-reloading:
 
-## Deploy on Vercel
+```bash
+npm run dev:server
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Production Mode
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Build the application for production:
+
+```bash
+npm run build
+npm run build:server
+```
+
+Start the production server:
+
+```bash
+npm run start:prod
+```
+
+## Usage
+
+1. Open your browser and navigate to `http://localhost:3000` (or the configured port)
+2. Login with the credentials set in the `.env` file
+3. Use the UI to manage your programs:
+   - Add new programs with a name, command, and screen name
+   - Start/stop existing programs
+   - Monitor program status in real-time
+   - Connect to terminal sessions for running programs
+
+## API
+
+The application provides a WebSocket-based RPC API with the following methods:
+
+- `listPrograms`: Get a list of all configured programs
+- `addProgram`: Add a new program
+- `editProgram`: Update an existing program
+- `deleteProgram`: Delete a program
+- `startProgram`: Start a program in its screen session
+- `stopProgram`: Send SIGINT to a running program
+- `terminateProgram`: Kill a running program
+- `getProgramStatus`: Get the current status of a program
+- `startScreen`: Start a new screen session for a program
+- `sendCommandToScreen`: Send a command to a screen session
+
+## License
+
+MIT
