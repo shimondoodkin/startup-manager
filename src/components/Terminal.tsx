@@ -5,6 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { ProgramState } from '@/lib/Program';
 import { useWebSocket } from '@/lib/WebSocketContext';
 import { TerminalSessionInfo } from '@/lib/TerminalServer';
+import { TerminalManager } from '@/lib/TerminalManager';
 
 // Import xterm CSS only on the client side
 import 'xterm/css/xterm.css';
@@ -39,6 +40,71 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       if (!terminalRef.current) return;
       
       try {
+        // Get terminal key based on program or standalone mode
+        const terminalKey = standalone ? 'standalone' : program?.screenName || '';
+        if (!standalone && !program?.screenName) {
+          console.error('Cannot initialize terminal: no screen name provided');
+          setError('Cannot initialize terminal: no screen name provided');
+          return;
+        }
+        
+        // Try to get existing terminal instance
+        const existingInstance = TerminalManager.getInstance(terminalKey);
+        
+        // If we have an existing instance with a connected socket, use it
+        if (existingInstance && existingInstance.socket && existingInstance.socket.connected && existingInstance.term) {
+          console.log(`Reusing existing terminal instance for ${terminalKey}`);
+          
+          // Update the last used timestamp
+          existingInstance.lastUsed = new Date();
+          
+          // First, make sure terminalRef is empty to avoid multiple terminals
+          if (terminalRef.current) {
+            while (terminalRef.current.firstChild) {
+              terminalRef.current.removeChild(terminalRef.current.firstChild);
+            }
+          }
+          
+          // Set the terminal and socket from the existing instance
+          setTerminal(existingInstance.term);
+          setSocket(existingInstance.socket);
+          setIsConnected(true);
+          setActiveTerminals(TerminalManager.getActiveTerminals());
+          
+          // Reattach the terminal to the DOM
+          if (terminalRef.current && existingInstance.term.term) {
+            // Check if we have a saved element in the instance
+            if (existingInstance.element) {
+              console.log('Reusing saved terminal element');
+              // Reuse the saved element
+              terminalRef.current.appendChild(existingInstance.element);
+              if (existingInstance.term.fitAddon) {
+                existingInstance.term.fitAddon.fit();
+              }
+            } else if (existingInstance.term.term.element) {
+              console.log('Reusing terminal element from term object');
+              // Use the element from the term object
+              terminalRef.current.appendChild(existingInstance.term.term.element);
+              if (existingInstance.term.fitAddon) {
+                existingInstance.term.fitAddon.fit();
+              }
+            } else {
+              console.log('Creating new terminal element');
+              // Fallback if element is not available
+              existingInstance.term.term.open(terminalRef.current);
+              if (existingInstance.term.fitAddon) {
+                existingInstance.term.fitAddon.fit();
+              }
+              // Request a screen refresh to ensure content is up to date
+              existingInstance.socket.emit('input', '\x0c'); // Send Ctrl+L to refresh screen
+            }
+          }
+          
+          // Request updated list of active terminals
+          existingInstance.socket.emit('list_terminals');
+          return;
+        }
+        
         // Dynamic imports to avoid SSR issues
         const xtermModule = await import('xterm');
         const fitAddonModule = await import('xterm-addon-fit');
@@ -78,17 +144,26 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
         
         window.addEventListener('resize', handleResize);
         
-        setTerminal({
+        const terminalObj = {
           term,
           fitAddon,
           dispose: () => {
             window.removeEventListener('resize', handleResize);
             if (term) term.dispose();
           }
-        });
+        };
+        
+        setTerminal(terminalObj);
+        
+        // Create or update terminal instance in the manager
+        const instance = TerminalManager.getOrCreateInstance(
+          program?.screenName || 'standalone',
+          standalone
+        );
+        instance.term = terminalObj;
         
         // Connect to WebSocket after terminal is initialized
-        connectToWebSocket(term);
+        connectToWebSocket(term, instance);
         
       } catch (err) {
         console.error('Failed to load terminal:', err);
@@ -99,18 +174,33 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
     initTerminal();
     
     return () => {
-      if (terminal && terminal.dispose) {
-        terminal.dispose();
-      }
-      
-      if (socket) {
-        socket.disconnect();
+      // Don't dispose the terminal or disconnect the socket on unmount
+      // Just detach the terminal from the DOM and save it for later reuse
+      if (terminal && terminal.term) {
+        try {
+          // Get terminal key
+          const terminalKey = standalone ? 'standalone' : program?.screenName || '';
+          const instance = TerminalManager.getInstance(terminalKey);
+          
+          // Only detach from DOM, don't dispose
+          if (terminal.term.element && terminal.term.element.parentNode) {
+            // Store the element reference in the instance for reattachment
+            if (instance) {
+              // Save the element reference in the instance
+              instance.element = terminal.term.element;
+              TerminalManager.setInstance(terminalKey, instance);
+            }
+            terminal.term.element.parentNode.removeChild(terminal.term.element);
+          }
+        } catch (err) {
+          console.error('Error detaching terminal:', err);
+        }
       }
     };
-  }, []);
+  }, [program?.screenName, standalone]);
   
   // Function to connect to WebSocket
-  const connectToWebSocket = async (term: any) => {
+  const connectToWebSocket = async (term: any, instance?: any) => {
     if (!isAuthenticated || !client) {
       console.error('Cannot connect to terminal: not authenticated');
       term.writeln('\r\n\x1b[1;31mCannot connect to terminal: not authenticated\x1b[0m');
@@ -124,11 +214,38 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       return;
     }
     
+    // Get terminal key based on program or standalone mode
+    const terminalKey = standalone ? 'standalone' : program?.screenName || '';
+    
+    // Get or create terminal instance
+    const terminalInstance = instance || TerminalManager.getOrCreateInstance(
+      program?.screenName || 'standalone',
+      standalone
+    );
+    
+    // If we already have a connected socket in the instance, reuse it
+    if (terminalInstance.socket && terminalInstance.socket.connected) {
+      console.log(`Reusing existing socket connection for ${terminalKey}`);
+      
+      // Set up event handlers for the existing socket
+      setupSocketEventHandlers(terminalInstance.socket, term);
+      
+      // Request list of active terminals
+      terminalInstance.socket.emit('list_terminals');
+      
+      // Set the socket state
+      setSocket(terminalInstance.socket);
+      setIsConnected(true);
+      
+      return;
+    }
+    
+    // If we get here, we need to create a new connection
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.host;
     const wsUrl = `${wsProtocol}//${wsHost}`;
     
-    console.log(`Connecting to terminal WebSocket at ${wsUrl}`);
+    console.log(`Creating new terminal WebSocket connection at ${wsUrl}`);
     term.writeln(`\r\nConnecting to ${wsUrl}...`);
     
     // Get a token for terminal authentication
@@ -148,7 +265,7 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       path: '/api/programs/socket.io',
       query: {
         screenName: standalone ? 'standalone' : program?.screenName,
-        sessionId: Date.now().toString(),
+        sessionId: terminalInstance.sessionId,
         standalone: standalone ? 'true' : 'false'
       },
       auth: { token: authToken },
@@ -157,7 +274,22 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       reconnectionDelay: 1000
     });
     
-    newSocket.on('connect', () => {
+    // Set up event handlers for the new socket
+    setupSocketEventHandlers(newSocket, term);
+    
+    // Store socket in terminal instance
+    terminalInstance.socket = newSocket;
+    TerminalManager.setInstance(terminalKey, terminalInstance);
+    
+    setSocket(newSocket);
+  };
+  
+  // Extract socket event handlers to a separate function to avoid duplication
+  const setupSocketEventHandlers = (socket: Socket, term: any) => {
+    // Remove any existing listeners to prevent duplicates
+    socket.removeAllListeners();
+    
+    socket.on('connect', () => {
       console.log(`Terminal WebSocket connected`);
       setIsConnected(true);
       term.writeln('\r\n\x1b[1;32mConnected to terminal server\x1b[0m');
@@ -165,44 +297,46 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
       // Request to attach to the screen session or start standalone terminal
       if (standalone) {
         console.log('Requesting standalone terminal');
-        newSocket.emit('attach', { standalone: true });
+        socket.emit('attach', { standalone: true });
       } else if (program) {
         console.log(`Requesting terminal for screen: ${program.screenName}`);
-        newSocket.emit('attach', { screenName: program.screenName });
+        socket.emit('attach', { screenName: program.screenName });
       }
       
       // Request list of active terminals
-      newSocket.emit('list_terminals');
+      socket.emit('list_terminals');
     });
     
-    newSocket.on('connect_error', (err) => {
+    socket.on('connect_error', (err) => {
       console.error('Terminal WebSocket connection error:', err);
       term.writeln('\r\n\x1b[1;31mConnection error: ' + err.message + '\x1b[0m');
       setError(err.message);
     });
     
-    newSocket.on('output', (data: string) => {
+    socket.on('output', (data: string) => {
       console.log(`Received ${data.length} bytes of output from server`);
       term.write(data);
     });
     
-    newSocket.on('connected', (data: any) => {
+    socket.on('connected', (data: any) => {
       console.log('Terminal session connected:', data);
       term.writeln('\r\n\x1b[1;32mTerminal session established\x1b[0m\r\n');
     });
     
-    newSocket.on('active_terminals', (terminals: TerminalSessionInfo[]) => {
+    socket.on('active_terminals', (terminals: TerminalSessionInfo[]) => {
       console.log('Received active terminals list:', terminals);
       setActiveTerminals(terminals);
+      // Also store in the TerminalManager
+      TerminalManager.setActiveTerminals(terminals);
     });
     
-    newSocket.on('disconnect', () => {
+    socket.on('disconnect', () => {
       console.log(`Terminal WebSocket disconnected`);
       setIsConnected(false);
       term.writeln('\r\n\x1b[1;31mDisconnected from terminal\x1b[0m');
     });
     
-    newSocket.on('error', (err: string) => {
+    socket.on('error', (err: string) => {
       console.error('Terminal WebSocket error:', err);
       setError(err);
       term.writeln('\r\n\x1b[1;31mError: ' + err + '\x1b[0m');
@@ -210,13 +344,11 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
     
     // Handle input from terminal
     term.onData((data: string) => {
-      if (newSocket.connected) {
+      if (socket.connected) {
         console.log(`Sending ${data.length} bytes of input to server`);
-        newSocket.emit('input', data);
+        socket.emit('input', data);
       }
     });
-    
-    setSocket(newSocket);
   };
   
   const switchToTerminal = (screenName: string) => {
@@ -230,6 +362,15 @@ export const Terminal: React.FC<TerminalProps> = ({ program, standalone = false,
     // Request to attach to the selected screen
     socket.emit('attach', { screenName });
     setShowTerminalList(false);
+    
+    // Update the terminal instance in the manager
+    const terminalKey = standalone ? 'standalone' : program?.screenName || '';
+    const instance = TerminalManager.getInstance(terminalKey);
+    if (instance) {
+      instance.screenName = screenName;
+      instance.lastUsed = new Date();
+      TerminalManager.setInstance(terminalKey, instance);
+    }
   };
   
   const formatDate = (dateString: string) => {
