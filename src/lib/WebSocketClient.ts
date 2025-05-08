@@ -10,7 +10,32 @@ export interface WebSocketClientOptions {
 }
 
 export class WebSocketClient {
+  // Add event subscription methods for arbitrary events
+  public on(event: string, handler: (...args: any[]) => void): void {
+    if (this.socket) {
+      this.socket.on(event, handler);
+    }
+  }
+
+  public off(event: string, handler: (...args: any[]) => void): void {
+    if (this.socket) {
+      this.socket.off(event, handler);
+    }
+  }
   private socket: Socket | null = null;
+
+  /**
+   * Emit a custom event on the underlying socket.
+   * @param event The event name to emit
+   * @param args Arguments to send with the event
+   */
+  public emit(event: string, ...args: any[]): void {
+    if (this.socket && this.connected) {
+      this.socket.emit(event, ...args);
+    } else {
+      console.warn('WebSocketClient: Attempted to emit on disconnected socket:', event, args);
+    }
+  }
   private connected = false;
   private options: WebSocketClientOptions;
   private requestMap = new Map<string, { resolve: Function, reject: Function }>();

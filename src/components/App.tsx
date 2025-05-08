@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { WebSocketProvider } from '@/lib/WebSocketContext';
+import { StartupManagerProvider } from '@/lib/StartupManagerContext';
 import { LoginForm } from './LoginForm';
 import { TabsContainer } from './TabsContainer';
 
@@ -26,12 +26,12 @@ export const App: React.FC = () => {
   }
   
   return (
-    <WebSocketProvider wsUrl={wsUrl}>
+    <StartupManagerProvider wsUrl={wsUrl}>
       {!isAuthenticated ? (
         <LoginForm onLoginSuccess={() => setIsAuthenticated(true)} />
       ) : (
         <TabsContainer />
       )}
-    </WebSocketProvider>
+    </StartupManagerProvider>
   );
 };

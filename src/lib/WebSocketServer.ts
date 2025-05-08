@@ -3,6 +3,7 @@ import { Program, ProgramManager, ProgramState } from './Program';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
+import { TerminalServer } from './TerminalServer';
 
 // Define the RPC message types
 export interface RPCRequest {
@@ -32,6 +33,7 @@ interface AuthToken {
 export class WebSocketServer {
   private io: Namespace;
   private programManager: ProgramManager;
+  private terminalServer: TerminalServer | null = null;
   private monitoringInterval: NodeJS.Timeout | null = null;
   private authCredentials = {
     username: process.env.ADMIN_USERNAME || 'admin',
@@ -165,6 +167,47 @@ export class WebSocketServer {
       case 'validateTerminalToken':
         return { valid: this.validateAuthToken(params.token) };
         
+      case 'listTerminals':
+        if (!this.terminalServer) {
+          throw new Error('Terminal server not initialized');
+        }
+        return this.terminalServer.listTerminals();
+        
+      case 'createTerminal':
+        if (!this.terminalServer) {
+          throw new Error('Terminal server not initialized');
+        }
+        // Create a terminal with the provided options (screenName or shell)
+        const { screenName, shell } = params;
+        const token = this.generateAuthToken(socketId).token;
+        const terminalInfo = this.terminalServer.createTerminal({ screenName, shell });
+        return {
+          token,
+          terminalId: terminalInfo.id
+        };
+
+        
+      case 'getTerminalInfo':
+        if (!this.terminalServer) {
+          throw new Error('Terminal server not initialized');
+        }
+        // Get information about a specific terminal
+        const terminalId = params.id;
+        const info = this.terminalServer.getTerminalInfo(terminalId);
+        if (!info) {
+          throw new Error(`Terminal with ID ${terminalId} not found`);
+        }
+        return info;
+
+      case 'closeTerminal':
+        if (!this.terminalServer) {
+          throw new Error('Terminal server not initialized');
+        }
+        // Close the specified terminal
+        console.log(`RPC: Closing terminal ${params.id}`);
+        this.terminalServer.closeTerminal(params.id);
+        return { success: true };
+        
       default:
         throw new Error(`Unknown method: ${method}`);
     }
@@ -182,6 +225,11 @@ export class WebSocketServer {
   async initialize() {
     await this.programManager.loadPrograms();
     await this.programManager.startAllAutoStart();
+  }
+  
+  // Set the terminal server instance for terminal-related operations
+  setTerminalServer(terminalServer: TerminalServer) {
+    this.terminalServer = terminalServer;
   }
   
   private startMonitoring() {

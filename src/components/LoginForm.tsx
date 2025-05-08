@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useWebSocket } from '@/lib/WebSocketContext';
+import { useStartupManager } from '@/lib/StartupManagerContext';
 
 interface LoginFormProps {
   onLoginSuccess: () => void;
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
-  const { login, error } = useWebSocket();
+  const { login, error } = useStartupManager();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);

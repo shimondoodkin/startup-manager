@@ -2,9 +2,11 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { WebSocketClient } from './WebSocketClient';
+import { TerminalManagerClass } from './TerminalManager';
+import { TabsManagerClass } from './TabsManager';
 import { ProgramState } from './Program';
 
-interface WebSocketContextType {
+interface StartupManagerContextType {
   client: WebSocketClient | null;
   isConnected: boolean;
   isAuthenticated: boolean;
@@ -20,32 +22,36 @@ interface WebSocketContextType {
   terminateProgram: (id: string) => Promise<void>;
   startScreen: (id: string) => Promise<void>;
   sendCommandToScreen: (id: string, command: string) => Promise<void>;
+  terminalManager: TerminalManagerClass;
+  tabsManager: TabsManagerClass;
 }
 
-const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
+const StartupManagerContext = createContext<StartupManagerContextType | undefined>(undefined);
 
-export const useWebSocket = () => {
-  const context = useContext(WebSocketContext);
+export const useStartupManager = () => {
+  const context = useContext(StartupManagerContext);
   if (!context) {
-    throw new Error('useWebSocket must be used within a WebSocketProvider');
+    throw new Error('useStartupManager must be used within a StartupManagerProvider');
   }
   return context;
 };
 
-interface WebSocketProviderProps {
+interface StartupManagerProviderProps {
   children: ReactNode;
   wsUrl?: string;
 }
 
-export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ 
+export const StartupManagerProvider: React.FC<StartupManagerProviderProps> = ({ 
   children,
   wsUrl 
 }) => {
+  const [tabsManager] = useState(() => new TabsManagerClass());
   const [client, setClient] = useState<WebSocketClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [programs, setPrograms] = useState<ProgramState[]>([]);
+  const [terminalManager, setTerminalManager] = useState<TerminalManagerClass>(new TerminalManagerClass(null, tabsManager));
 
   // Create WebSocket client instance
   useEffect(() => {
@@ -104,6 +110,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
       ws.disconnect();
     };
   }, [wsUrl]);
+
+  // Update terminalManager when client changes
+  useEffect(() => {
+    setTerminalManager(new TerminalManagerClass(client,tabsManager));
+  }, [client]);
 
   const login = async (username: string, password: string) => {
     if (!client) throw new Error('WebSocket client not initialized');
@@ -224,7 +235,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   };
 
   return (
-    <WebSocketContext.Provider value={{
+    <StartupManagerContext.Provider value={{
       client,
       isConnected,
       isAuthenticated,
@@ -239,9 +250,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
       stopProgram,
       terminateProgram,
       startScreen,
-      sendCommandToScreen
+      sendCommandToScreen,
+      terminalManager,
+      tabsManager
     }}>
       {children}
-    </WebSocketContext.Provider>
+    </StartupManagerContext.Provider>
   );
 };

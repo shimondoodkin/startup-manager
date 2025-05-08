@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ProgramState, StopMethod } from '@/lib/Program';
-import { useWebSocket } from '@/lib/WebSocketContext';
+import { useStartupManager } from '@/lib/StartupManagerContext';
 
 interface ProgramFormProps {
   program?: ProgramState;
@@ -11,7 +11,7 @@ interface ProgramFormProps {
 }
 
 export const ProgramForm: React.FC<ProgramFormProps> = ({ program, onCancel, onSave }) => {
-  const { addProgram, updateProgram, deleteProgram } = useWebSocket();
+  const { addProgram, updateProgram, deleteProgram } = useStartupManager();
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [screenName, setScreenName] = useState('');

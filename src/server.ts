@@ -53,11 +53,12 @@ async function start() {
   const wsServer = new WebSocketServer(programsNamespace);
   await wsServer.initialize();
 
-  // Store the WebSocket server instance globally for token validation
-  (global as any).WebSocketServerInstance = wsServer;
-
   // Initialize Terminal server with its namespace
   const terminalServer = new TerminalServer(terminalNamespace);
+
+  // Connect the terminal server to the websocket server
+  wsServer.setTerminalServer(terminalServer);
+  terminalServer.setWebSocketServer(wsServer);
 
   // Try to listen on the current port
   await new Promise<void>((resolve) => { server.listen(port, resolve); });
@@ -121,7 +122,6 @@ async function start() {
       process.exit(1);
     }
   });
-
 }
 
 start();

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useWebSocket } from '@/lib/WebSocketContext';
+import { useStartupManager } from '@/lib/StartupManagerContext';
 import { ProgramState } from '@/lib/Program';
 
 interface ProgramListProps {
@@ -10,7 +10,7 @@ interface ProgramListProps {
 }
 
 export const ProgramList: React.FC<ProgramListProps> = ({ onEdit, onTerminal }) => {
-  const { programs, startProgram, stopProgram, terminateProgram, startScreen } = useWebSocket();
+  const { programs, startProgram, stopProgram, terminateProgram, startScreen } = useStartupManager();
 
   const handleAction = async (action: string, programId: string) => {
     try {

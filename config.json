@@ -11,7 +11,7 @@
   {
     "id": "015e22ac-f118-4b0d-8869-4d551c6af3f8",
     "name": "nano2",
-    "command": "nano test2.txt",
+    "command": "nano test2.txt aaaa",
     "screenName": "nano2",
     "maxChildDepth": 1,
     "autoStart": false,
