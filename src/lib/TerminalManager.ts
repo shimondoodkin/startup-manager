@@ -38,6 +38,7 @@ export interface TerminalInstance {
     createdAt: string;
     connectionCount?: number; // Number of active connections to this PTY
   };
+  onConnectionChange?: (connected: boolean) => void
 }
 
 // Singleton class to manage terminal instances
@@ -45,7 +46,7 @@ import type { WebSocketClient } from './WebSocketClient';
 import { TabsManagerClass } from './TabsManager';
 
 export class TerminalManagerClass {
-  private client: WebSocketClient | null; 
+  private client: WebSocketClient | null;
   private tabsManager: TabsManagerClass;
   constructor(client: WebSocketClient | null, tabsManager: TabsManagerClass) {
     this.client = client;
@@ -119,7 +120,12 @@ export class TerminalManagerClass {
 
   // Store a terminal instance
   setInstance(id: string, instance: TerminalInstance): void {
+    let existingInstance = this.instances.get(id);
+    // if (existingInstance) {
+    //   Object.assign(existingInstance, instance);
+    // } else {
     this.instances.set(id, instance);
+    // }
     this.notifyListeners();
   }
 
@@ -143,8 +149,8 @@ export class TerminalManagerClass {
 
   // Initialize and subscribe to tab changes
   // Standalone function to sync tabs with terminal instances
-  syncTabsWithTerminals  () : void {
-    
+  syncTabsWithTerminals(): void {
+
     const terminalInstances = this.getAllInstances();
     const currentTabs = this.tabsManager.getTabs();
 
@@ -159,7 +165,7 @@ export class TerminalManagerClass {
           title: instance.screenName ? `Terminal: ${instance.screenName}` : 'Terminal',
           closable: true,
           terminalInstance: instance,
-          active:false,
+          active: false,
         });
         // Attach terminalInstance to the new tab
         // const newTab = tabsManager.getTabById(tabId);
@@ -235,7 +241,7 @@ export class TerminalManagerClass {
       }
 
       this.syncTabsWithTerminals();
-      
+
       this.notifyListeners();
     } catch (err) {
       console.error('Failed to sync terminals with server:', err);
@@ -311,8 +317,12 @@ export class TerminalManagerClass {
   }
 
   // Initialize a terminal instance with xterm.js
-  async initializeTerminal(instance: TerminalInstance, domElement: HTMLElement): Promise<{ term: import('xterm').Terminal; fitAddon: import('xterm-addon-fit').FitAddon; webLinksAddon: import('xterm-addon-web-links').WebLinksAddon; dispose: () => void }> {
+  async ensureTerminalIsInitialized(instance: TerminalInstance): Promise<void> {
     try {
+
+      if (instance.term) 
+        return;
+
       // Dynamic imports to avoid SSR issues
       const xtermModule = await import('xterm');
       const fitAddonModule = await import('xterm-addon-fit');
@@ -339,11 +349,10 @@ export class TerminalManagerClass {
       term.loadAddon(fitAddon);
       term.loadAddon(webLinksAddon);
 
-      term.open(domElement);
-      fitAddon.fit();
-
-      // Write initial message to confirm terminal is working
-      term.writeln('Terminal initialized. Connecting to server...');
+      // term.open(domElement);
+      // fitAddon.fit();
+      // // Write initial message to confirm terminal is working
+      // term.writeln('Terminal initialized. Connecting to server...');
 
       // Handle window resize
       const handleResize = () => {
@@ -366,7 +375,19 @@ export class TerminalManagerClass {
       instance.term = terminalObj;
       this.setInstance(instance.id, instance);
 
-      return terminalObj;
+      // return terminalObj;
+
+      await this.connectTerminal(instance);
+    
+      if (instance?.term?.term && instance.socket) {
+        this.setupTerminalEvents(
+          instance,
+          instance.term.term,
+          instance.socket
+        );
+      }
+
+      
     } catch (err) {
       console.error('Failed to initialize terminal:', err);
       throw err;
@@ -374,7 +395,7 @@ export class TerminalManagerClass {
   }
 
   // Connect a terminal instance to the WebSocket server
-  async connectTerminal(instance: TerminalInstance, term: import('xterm').Terminal): Promise<Socket> {
+  async connectTerminal(instance: TerminalInstance): Promise<Socket> {
     try {
       // If we already have a connected socket, reuse it
       if (instance.socket && instance.socket.connected) {
@@ -383,6 +404,11 @@ export class TerminalManagerClass {
         this.setInstance(instance.id, instance);
         return instance.socket;
       }
+
+      if (!instance?.term?.term) {
+        throw new Error('Terminal not initialized');
+      }
+      const term: import('xterm').Terminal = instance.term.term;
 
       // Make sure we have pty info from the server
       if (!instance.ptyInfo) {
@@ -469,7 +495,8 @@ export class TerminalManagerClass {
   }
 
   // Set up event handlers for a terminal instance
-  setupTerminalEvents(instance: TerminalInstance, term: import('xterm').Terminal, socket: Socket, onConnectionChange?: (connected: boolean) => void): void {
+  setupTerminalEvents(instance: TerminalInstance, term: import('xterm').Terminal, socket: Socket
+  ): void {
     if (!socket || !term) return;
 
     // Remove any existing listeners to prevent duplicates
@@ -479,7 +506,7 @@ export class TerminalManagerClass {
       console.log(`Terminal WebSocket connected for ${instance.id}`);
       instance.connected = true;
       this.setInstance(instance.id, instance);
-      onConnectionChange?.(true);
+      instance.onConnectionChange?.(true);
       term.writeln('\r\n\x1b[1;32mConnected to terminal server\x1b[0m');
 
       // Request to attach to the existing terminal by ID
@@ -497,7 +524,7 @@ export class TerminalManagerClass {
       term.writeln('\r\n\x1b[1;31mConnection error: ' + err.message + '\x1b[0m');
       instance.connected = false;
       this.setInstance(instance.id, instance);
-      onConnectionChange?.(false);
+      instance.onConnectionChange?.(false);
     });
 
     socket.on('output', (data: string) => {
@@ -534,7 +561,7 @@ export class TerminalManagerClass {
       }
 
       this.setInstance(instance.id, instance);
-      onConnectionChange?.(false);
+      instance.onConnectionChange?.(false);
       term.writeln('\r\n\x1b[1;31mDisconnected from terminal\x1b[0m');
     });
 
@@ -562,7 +589,7 @@ export class TerminalManagerClass {
       this.notifyListeners();
 
       term.writeln('\r\n\x1b[1;31mTerminal closed by server\x1b[0m');
-      onConnectionChange?.(false);
+      instance.onConnectionChange?.(false);
     });
 
     // Listen for connection count updates from server
@@ -596,63 +623,12 @@ export class TerminalManagerClass {
 
   // Detach a terminal from the DOM without disposing it
   detachTerminal(instance: TerminalInstance): void {
-    if (!instance || !instance.term || !instance.term.term) return;
 
-    try {
-      // Only detach from DOM, don't dispose
-      if (instance.term && instance.term.term && instance.term.term.element && instance.term.term.element.parentNode) {
-        // Save the element reference in the instance for reattachment
-        instance.element = instance.term.term.element;
-        instance.term.term.element.parentNode.removeChild(instance.term.term.element);
-
-        // Update the instance in the manager
-        this.setInstance(instance.id, instance);
-        console.log(`Detached terminal ${instance.id} from DOM`);
-      }
-    } catch (err) {
-      console.error(`Error detaching terminal ${instance.id}:`, err);
-    }
   }
 
   // Reattach a terminal to the DOM
   reattachTerminal(instance: TerminalInstance, domElement: HTMLElement): boolean {
-    if (!instance || !instance.term) return false;
-
-    try {
-      // Check if we have a saved element in the instance
-      if (instance.element) {
-        console.log(`Reattaching terminal ${instance.id} using saved element`);
-        domElement.appendChild(instance.element);
-        if (instance.term.fitAddon) {
-          instance.term.fitAddon.fit();
-        }
-        return true;
-      } else if (instance.term && instance.term.term && instance.term.term.element) {
-        console.log(`Reattaching terminal ${instance.id} using term element`);
-        domElement.appendChild(instance.term.term.element);
-        if (instance.term.fitAddon) {
-          instance.term.fitAddon.fit();
-        }
-        return true;
-      } else {
-        console.log(`Creating new terminal element for ${instance.id}`);
-        // Fallback if element is not available
-        if (instance.term && instance.term.term) {
-          instance.term.term.open(domElement);
-        }
-        if (instance.term.fitAddon) {
-          instance.term.fitAddon.fit();
-        }
-        // Request a screen refresh to ensure content is up to date
-        if (instance.socket && instance.socket.connected) {
-          instance.socket.emit('input', '\x0c'); // Send Ctrl+L to refresh screen
-        }
-        return true;
-      }
-    } catch (err) {
-      console.error(`Error reattaching terminal ${instance.id}:`, err);
-      return false;
-    }
+    return true;
   }
 
   // Get terminal instance by ID
