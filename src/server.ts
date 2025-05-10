@@ -42,7 +42,8 @@ async function start() {
 
   // Create a single Socket.IO server instance
   const io = new SocketIOServer(server, {
-    path: '/api/programs/socket.io'
+    path: '/api/programs/socket.io',
+    transports: ['websocket']
   });
 
   // Create namespaces for different services

@@ -531,7 +531,7 @@ export class ProgramManager {
   
   getProgramStates(): ProgramState[] {
     const states = this.getPrograms().map(p => p.getState());
-    console.log(`Getting program states, found ${states.length} programs:`, states);
+    // console.log(`Getting program states, found ${states.length} programs:`, states);
     return states;
   }
   

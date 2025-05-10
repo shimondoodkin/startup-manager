@@ -45,7 +45,7 @@ export const TabsContainer: React.FC = () => {
       type: 'form',
       title: 'Add Program',
       closable: true,
-      active: false,
+      active: true,
     });
   };
 
@@ -58,7 +58,7 @@ export const TabsContainer: React.FC = () => {
       program,
       title: `Edit ${program.name}`,
       closable: true,
-      active: false,
+      active: true,
     });
   };
 
@@ -205,7 +205,7 @@ export const TabsContainer: React.FC = () => {
 
     // Handler for server event
     const handleTerminalListChanged = async () => {
-      await terminalManager.syncWithServer();
+      await terminalManager.updateTerminalInstancesFromServer();
     };
 
     // Listen for terminalListChanged event

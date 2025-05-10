@@ -213,6 +213,10 @@ export class WebSocketServer {
     }
   }
   
+  public broadcastTerminalsChanged() {
+    this.io.emit('terminalsChanged');
+  }
+  
   private broadcastStatusChange(program: ProgramState) {
     const notification: RPCNotification = {
       method: 'programStatusChanged',

@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RPCRequest, RPCResponse, RPCNotification } from './WebSocketServer';
+import { TerminalManagerClass } from './TerminalManager';
 
 export interface WebSocketClientOptions {
   url: string;
@@ -7,6 +8,7 @@ export interface WebSocketClientOptions {
     username: string;
     password: string;
   };
+  terminalManager: TerminalManagerClass
 }
 
 export class WebSocketClient {
@@ -46,9 +48,11 @@ export class WebSocketClient {
   private disconnectedHandler: (() => void) | null = null;
   private errorHandler: ((error: any) => void) | null = null;
   private authCredentials: { username: string, password: string } | null = null;
+  private terminalManager:TerminalManagerClass | null = null;
 
   constructor(options: WebSocketClientOptions) {
     this.options = options;
+    this.terminalManager=options.terminalManager;
   }
 
   async connect(): Promise<void> {
@@ -62,6 +66,7 @@ export class WebSocketClient {
       try {
         this.socket = io(this.options.url, {
           path: '/api/programs/socket.io',
+          transports:['websocket'],
           autoConnect: true,
           reconnection: true,
           reconnectionDelay: 1000,
@@ -91,9 +96,13 @@ export class WebSocketClient {
           reject(error);
         });
 
+        this.on('terminalsChanged', () => {
+          console.log('Received terminalsChanged notification');
+          if (this.terminalManager) this.terminalManager.updateTerminalInstancesFromServer();
+        });
         this.socket.on('notification', (notification: RPCNotification) => {
           console.log('Received notification:', notification.method, notification.params);
-          
+
           if (notification.method === 'programStatusChanged' && this.statusChangeHandler) {
             console.log('Processing program status change:', notification.params);
             this.statusChangeHandler(notification.params);
@@ -153,9 +162,9 @@ export class WebSocketClient {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.authCredentials = { username, password };
-    
+
     return new Promise((resolve, reject) => {
       this.socket!.emit('rpc', {
         jsonrpc: '2.0',
@@ -171,7 +180,7 @@ export class WebSocketClient {
       });
     });
   }
-  
+
   getAuthCredentials(): { username: string, password: string } | null {
     return this.authCredentials;
   }
@@ -179,7 +188,7 @@ export class WebSocketClient {
   onStatusChange(handler: (program: any) => void) {
     this.statusChangeHandler = handler;
   }
-  
+
   onInitialProgramList(handler: (programs: any[]) => void): void {
     this.initialProgramListHandler = handler;
   }

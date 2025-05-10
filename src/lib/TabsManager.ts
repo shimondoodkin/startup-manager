@@ -4,15 +4,24 @@ import { TerminalInstance } from './TerminalManager'; // Use only the type, not 
 // All usages of TerminalManager must be refactored to use the instance from context.
 
 // Interface for tab instance
-export interface TabInstance {
+export interface BaseTabInstance {
   id: string;
-  type: 'list' | 'form' | 'terminal';
   active: boolean;
   title: string;
   closable: boolean;
-  program?: ProgramState;
-  terminalInstance?: TerminalInstance;
 }
+export interface ListTabInstance extends BaseTabInstance {
+  type: 'list';
+}
+export interface FormTabInstance extends BaseTabInstance {
+  type: 'form';
+  program?: ProgramState;
+}
+export interface TerminalTabInstance extends BaseTabInstance {
+  type: 'terminal';
+  terminalInstance: TerminalInstance;
+}
+export type TabInstance = ListTabInstance | FormTabInstance | TerminalTabInstance;
 
 // Singleton class to manage tabs
 export class TabsManagerClass {
@@ -55,12 +64,16 @@ export class TabsManagerClass {
     // For terminal tabs, we'll set the terminal instance later when the tab is activated
     // This is because we need to request a terminal from the server, which requires async operations
     // The Terminal component will handle requesting the terminal instance when it mounts
-
+    let setActive=newTab.active
+    newTab.active=false;
+    
     // Add to tabs array
     this.tabs.push(newTab);
     
     // Set as active tab
-    this.setActiveTab(newTab.id);
+    if(setActive){
+      this.setActiveTab(newTab.id);
+    }
     
     // Notify listeners
     this.notifyListeners();
@@ -149,6 +162,7 @@ export class TabsManagerClass {
   validateTerminalTabs(): void {
     // This is now a placeholder. All terminal tab validation logic should be handled in context-aware components (e.g., TabsContainer) using the terminalManager instance from context.
   }
+
 
   // Add a listener for tab changes
   addListener(callback: () => void): void {

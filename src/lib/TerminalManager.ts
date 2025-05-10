@@ -1,21 +1,30 @@
 import { Socket, io } from 'socket.io-client';
+import { TerminalSessionInfo } from './TerminalServer';
 
 // Types for dynamic imports
 // Removed unused dynamic import types to fix lint errors.
 
 // Interface for terminal session info from server
-export interface TerminalSessionInfo {
-  id: string;
-  pid: number;
-  screenName?: string;
+// export interface TerminalSessionInfo {
+//   id: string;
+//   pid: number;
+//   screenName?: string;
 
-  createdAt: string;
-  connectionCount?: number; // Number of active connections to this PTY
-}
+//   createdAt: string;
+//   connectionCount?: number; // Number of active connections to this PTY
+// }
 
 // Interface for terminal instance
 export interface TerminalInstance {
+
+  // Server-side PTY information
   id: string;
+  pid: number;
+  programName?: string;
+  createdAt: Date;
+  // connectionCount?: number; // Number of active connections to this PTY
+
+  //store terminal connection
   socket: Socket | null;
   term: {
     term: import('xterm').Terminal;
@@ -23,22 +32,14 @@ export interface TerminalInstance {
     webLinksAddon: import('xterm-addon-web-links').WebLinksAddon;
     dispose: () => void;
   } | null;
-  screenName: string;
+  element?: HTMLElement; // Store element reference to preserve DOM state
 
-  sessionId: string;
+  //some state variables not sure why needed
+  inittializing?: boolean;
+  inittialized?: boolean;
   lastUsed: Date;
-  // Store element reference to preserve DOM state
-  element?: HTMLElement;
-  // Flag to indicate if this instance has an active xterm connection
-  connected: boolean;
-  // Server-side PTY information
-  ptyInfo?: {
-    id: string;
-    pid: number;
-    createdAt: string;
-    connectionCount?: number; // Number of active connections to this PTY
-  };
-  onConnectionChange?: (connected: boolean) => void
+  connected: boolean;   // Flag to indicate if this instance has an active xterm connection
+  // onConnectionChange?: (connected: boolean) => void
 }
 
 // Singleton class to manage terminal instances
@@ -46,8 +47,14 @@ import type { WebSocketClient } from './WebSocketClient';
 import { TabsManagerClass } from './TabsManager';
 
 export class TerminalManagerClass {
+
   private client: WebSocketClient | null;
+  setClientWebSocket(ws: WebSocketClient) {
+    this.client = ws;
+  }
+
   private tabsManager: TabsManagerClass;
+
   constructor(client: WebSocketClient | null, tabsManager: TabsManagerClass) {
     this.client = client;
     this.tabsManager = tabsManager;
@@ -57,28 +64,22 @@ export class TerminalManagerClass {
   private listeners: Array<() => void> = [];
 
   // Create a new terminal instance with server-provided ID
-  registerTerminalOnClient(ptyInfo: TerminalSessionInfo): TerminalInstance {
+  addTerminalInstance(terminalInfo: TerminalSessionInfo): TerminalInstance {
     // Create a new instance with the server-provided ID
     const newInstance: TerminalInstance = {
-      id: ptyInfo.id, // Use server-provided ID
+      id: terminalInfo.id, // Use server-provided ID
       socket: null,
       term: null,
-      screenName: ptyInfo.screenName || '',
-
-      sessionId: Date.now().toString(),
+      programName: terminalInfo.programName || '',
+      pid: terminalInfo.pid,
+      createdAt: new Date(terminalInfo.createdAt),
       lastUsed: new Date(),
       connected: false,
-      ptyInfo: {
-        id: ptyInfo.id,
-        pid: ptyInfo.pid,
-        createdAt: ptyInfo.createdAt,
-        connectionCount: ptyInfo.connectionCount
-      }
     };
 
     // Use the server-provided ID as the key in the map
-    this.instances.set(ptyInfo.id, newInstance);
-    this.notifyListeners();
+    this.instances.set(terminalInfo.id, newInstance);
+    // this.notifyListeners();
     return newInstance;
   }
 
@@ -105,8 +106,8 @@ export class TerminalManagerClass {
         const terminalInfo = await this.getTerminalInfo(response.terminalId);
 
         // Create a new instance with the terminal info
-        const newInstance = this.registerTerminalOnClient(terminalInfo);
-        this.syncTabsWithTerminals();
+        const newInstance = this.addTerminalInstance(terminalInfo);
+        this.updateTabs(response.terminalId);
 
         return newInstance;
       } else {
@@ -126,7 +127,7 @@ export class TerminalManagerClass {
     // } else {
     this.instances.set(id, instance);
     // }
-    this.notifyListeners();
+    // this.notifyListeners();
   }
 
   // Get a terminal instance by ID
@@ -149,23 +150,22 @@ export class TerminalManagerClass {
 
   // Initialize and subscribe to tab changes
   // Standalone function to sync tabs with terminal instances
-  syncTabsWithTerminals(): void {
+  updateTabs(terminalId?: string): void {
 
-    const terminalInstances = this.getAllInstances();
     const currentTabs = this.tabsManager.getTabs();
 
     // Create tabs for new terminal instances
-    terminalInstances.forEach(instance => {
+    this.instances.forEach(instance => {
       const exists = currentTabs.some(tab => tab.type === 'terminal' && tab.terminalInstance && tab.terminalInstance.id === instance.id);
       if (!exists) {
         const tabId = `terminal-${instance.id}`;
         this.tabsManager.addTab({
           id: tabId,
           type: 'terminal',
-          title: instance.screenName ? `Terminal: ${instance.screenName}` : 'Terminal',
+          title: instance.programName ? `Terminal ${instance.id.slice(0, 3)}: ${instance.programName}` : `Terminal ${instance.id.slice(0, 3)}`,
           closable: true,
           terminalInstance: instance,
-          active: false,
+          active: instance.id===terminalId,
         });
         // Attach terminalInstance to the new tab
         // const newTab = tabsManager.getTabById(tabId);
@@ -176,7 +176,7 @@ export class TerminalManagerClass {
     // Remove tabs whose terminalInstance no longer exists
     currentTabs.forEach(tab => {
       if (tab.type === 'terminal' && tab.terminalInstance) {
-        const stillExists = terminalInstances.some(inst => inst.id === tab.terminalInstance?.id);
+        const stillExists = this.instances.has(tab.terminalInstance.id);
         if (!stillExists) {
           this.tabsManager.closeTab(tab.id);
         }
@@ -198,7 +198,7 @@ export class TerminalManagerClass {
   }
 
   // Sync terminal instances with server
-  async syncWithServer(): Promise<void> {
+  async updateTerminalInstancesFromServer(): Promise<void> {
     if (!this.client) throw new Error('TerminalManager: No client available');
     try {
       // Get all terminals from server
@@ -208,21 +208,19 @@ export class TerminalManagerClass {
       for (const serverTerminal of serverTerminals) {
         if (!this.instances.has(serverTerminal.id)) {
           // Create a new instance for this terminal
-          this.registerTerminalOnClient(serverTerminal);
+          this.addTerminalInstance(serverTerminal);
         } else {
           // Update existing instance with latest info from server
           const instance = this.instances.get(serverTerminal.id);
           if (instance) {
             // Update PTY info
-            instance.ptyInfo = {
-              id: serverTerminal.id,
-              pid: serverTerminal.pid,
-              createdAt: serverTerminal.createdAt,
-              connectionCount: serverTerminal.connectionCount
-            };
+            instance.id = serverTerminal.id;
+            instance.pid = serverTerminal.pid;
+            instance.createdAt = new Date(serverTerminal.createdAt);
+            // instance.connectionCount=serverTerminal.connectionCount;
 
             // Update other properties
-            instance.screenName = serverTerminal.screenName || '';
+            instance.programName = serverTerminal.programName || '';
             instance.lastUsed = new Date(); // Update last used time
 
             // Store updated instance
@@ -240,9 +238,9 @@ export class TerminalManagerClass {
         }
       }
 
-      this.syncTabsWithTerminals();
+      this.updateTabs();
 
-      this.notifyListeners();
+      // this.notifyListeners();
     } catch (err) {
       console.error('Failed to sync terminals with server:', err);
       throw err;
@@ -256,29 +254,17 @@ export class TerminalManagerClass {
       try {
         // Use the main WebSocketClient to call the closeTerminal RPC method
         if (this.client) {
-          console.log(`Calling closeTerminal RPC for terminal ${id} (${instance.screenName}) from TerminalManager`);
+          console.log(`Calling closeTerminal RPC for terminal ${id} (${instance.programName}) from TerminalManager`);
           await this.client.callRPC('closeTerminal', { id });
         } else {
           console.warn('TerminalManager: No WebSocketClient available to call closeTerminal RPC');
         }
 
-        // Update the instance state
-        instance.connected = false;
+        // Tipicaly not required, as server updates the client, can be here for faast response only
+        // this.removeInstance(id);
+        // this.updateTabsByTerminalInstances();
 
-        // If the terminal has an xterm instance, dispose it
-        if (instance.term && instance.term.dispose) {
-          try {
-            instance.term.dispose();
-          } catch (termErr) {
-            console.error(`Error disposing terminal ${id}:`, termErr);
-          }
-        }
-
-        // Remove the instance from our map
-        this.instances.delete(id);
-        this.syncTabsWithTerminals();
-
-        this.notifyListeners();
+        // this.notifyListeners();
 
         console.log(`Terminal instance ${id} closed and removed`);
       } catch (err) {
@@ -312,15 +298,41 @@ export class TerminalManagerClass {
       }
     }
     const result = this.instances.delete(id);
-    this.notifyListeners();
+    // this.notifyListeners();
     return result;
   }
 
   // Initialize a terminal instance with xterm.js
-  async ensureTerminalIsInitialized(instance: TerminalInstance): Promise<void> {
+  async ensureTerminalInitialized(instance: TerminalInstance): Promise<void> {
+    try {
+      if (instance.inittializing)
+      {
+        console.log(`Terminal instance ${instance.id} is already initializing`);
+        // throw new Error('Terminal already initializing');
+        return;
+      }
+      instance.inittializing=true;
+
+      await this.initializeXterm(instance);
+
+      await this.connectTerminal(instance);
+
+      await this.setupTerminalEvents(instance);
+      
+      instance.inittialized=true;
+      // instance.inittializing=false;
+    } catch (err) {
+      console.error('Failed to initialize terminal:', err);
+      throw err;
+    }
+  }
+
+  // called by ensureTerminalIsInitialized to create xterm object
+  // Initialize a terminal instance with xterm.js
+  async initializeXterm(instance: TerminalInstance): Promise<void> {
     try {
 
-      if (instance.term) 
+      if (instance.term)
         return;
 
       // Dynamic imports to avoid SSR issues
@@ -373,68 +385,62 @@ export class TerminalManagerClass {
 
       // Store the terminal object in the instance
       instance.term = terminalObj;
-      this.setInstance(instance.id, instance);
 
-      // return terminalObj;
+      // this.setInstance(instance.id, instance);// is this required to notify react on change
 
-      await this.connectTerminal(instance);
-    
-      if (instance?.term?.term && instance.socket) {
-        this.setupTerminalEvents(
-          instance,
-          instance.term.term,
-          instance.socket
-        );
-      }
-
-      
     } catch (err) {
       console.error('Failed to initialize terminal:', err);
       throw err;
     }
   }
 
+  // called by ensureTerminalIsInitialized to do the connection creation part
   // Connect a terminal instance to the WebSocket server
-  async connectTerminal(instance: TerminalInstance): Promise<Socket> {
+  async connectTerminal(instance: TerminalInstance): Promise<void> {
     try {
       // If we already have a connected socket, reuse it
       if (instance.socket && instance.socket.connected) {
-        console.log(`Reusing existing socket connection for ${instance.id}`);
-        instance.connected = true;
-        this.setInstance(instance.id, instance);
-        return instance.socket;
+        console.log('there is already a connection for that terminal, not connecting again');
+        return;
       }
+
+      // if (instance.socket && instance.socket.connected) {
+      //   console.log(`Reusing existing socket connection for ${instance.id}`);
+      //   instance.connected = true;
+      //   this.setInstance(instance.id, instance);
+      //   return instance.socket;
+      // }
 
       if (!instance?.term?.term) {
         throw new Error('Terminal not initialized');
       }
+
       const term: import('xterm').Terminal = instance.term.term;
 
       // Make sure we have pty info from the server
-      if (!instance.ptyInfo) {
-        console.error(`Cannot connect terminal ${instance.id}: missing pty info`);
-        term.writeln('\r\n\x1b[1;31mCannot connect terminal: missing pty info\x1b[0m');
-        throw new Error('Missing pty info');
-      }
+      // if (!instance.pid) {
+      //   console.error(`Cannot connect terminal ${instance.id}: missing pty info`);
+      //   term.writeln('\r\n\x1b[1;31mCannot connect terminal: missing pty info\x1b[0m');
+      //   throw new Error('Missing pty info');
+      // }
 
       // Check if the PTY terminal still exists on the server
-      try {
-        if (!this.client) {
-          throw new Error('WebSocket client not available');
-        }
-        const terminalInfo = await this.client.callRPC('getTerminalInfo', { id: instance.id });
-        // Update the PTY info with the latest from server
-        instance.ptyInfo = {
-          id: terminalInfo.id,
-          pid: terminalInfo.pid,
-          createdAt: terminalInfo.createdAt,
-          connectionCount: terminalInfo.connectionCount
-        };
-      } catch (err) {
-        console.error(`Terminal ${instance.id} no longer exists on server:`, err);
-        term.writeln(`\r\n\x1b[1;31mTerminal no longer exists on server\x1b[0m`);
-        throw new Error('Terminal no longer exists on server');
-      }
+      // try {
+      //   if (!this.client) {
+      //     throw new Error('WebSocket client not available');
+      //   }
+      //   const terminalInfo = await this.client.callRPC('getTerminalInfo', { id: instance.id });
+      //   // Update the PTY info with the latest from server
+      //   instance.id=terminalInfo.id;
+      //   instance.pid=terminalInfo.pid;
+      //   instance.createdAt=terminalInfo.createdAt.toString();
+      //   // instance.connectionCount=terminalInfo.connectionCount;
+      //   instance.programName=terminalInfo.programName;
+      // } catch (err) {
+      //   console.error(`Terminal ${instance.id} no longer exists on server:`, err);
+      //   term.writeln(`\r\n\x1b[1;31mTerminal no longer exists on server\x1b[0m`);
+      //   throw new Error('Terminal no longer exists on server');
+      // }
 
       // Create a new connection
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -446,9 +452,11 @@ export class TerminalManagerClass {
 
       // Get a token for terminal authentication
       term.writeln('\r\nRequesting authentication token...');
+
       if (!this.client) {
         throw new Error('WebSocket client not available');
       }
+
       const response = await this.client.callRPC('generateTerminalToken', {});
       if (!response || !response.token) {
         throw new Error('Failed to obtain terminal authentication token');
@@ -458,112 +466,112 @@ export class TerminalManagerClass {
 
       const newSocket = io(wsUrl + '/terminal', {
         path: '/api/programs/socket.io',
-        query: {
-          terminalId: instance.id, // Use the server-provided terminal ID
-          screenName: instance.screenName,
-          sessionId: instance.sessionId
-        },
+        transports: ['websocket'],
+        // query: {
+        //   terminalId: instance.id, // Use the server-provided terminal ID
+        //   programName: instance.programName,
+        // },
         auth: { token: authToken },
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000
       });
 
-      // Set up basic event handlers
-      newSocket.on('connect', () => {
-        console.log(`Terminal WebSocket connected for ${instance.id}`);
-        term.writeln('\r\n\x1b[1;32mConnected to terminal server\x1b[0m');
-        newSocket.emit('attach', { id: instance.id });
-      });
 
-      newSocket.on('output', (data: string) => {
-        term.write(data);
-      });
 
       // Store socket in terminal instance
       instance.socket = newSocket;
       instance.lastUsed = new Date();
-      instance.connected = true;
-      this.setInstance(instance.id, instance);
+      // instance.connected = true;
+      // this.setInstance(instance.id, instance); // is this to make react update? maybe not required
 
-      return newSocket;
+      // return newSocket;
     } catch (err) {
       console.error('Failed to connect terminal:', err);
-      term.writeln(`\r\n\x1b[1;31mFailed to connect: ${err}\x1b[0m`);
+      instance.term?.term?.writeln(`\r\n\x1b[1;31mFailed to connect: ${err}\x1b[0m`);
       throw err;
     }
   }
 
+  // called by ensureTerminalIsInitialized to do the websocket setup part
   // Set up event handlers for a terminal instance
-  setupTerminalEvents(instance: TerminalInstance, term: import('xterm').Terminal, socket: Socket
-  ): void {
-    if (!socket || !term) return;
+  async setupTerminalEvents(instance: TerminalInstance): Promise<void> {
 
-    // Remove any existing listeners to prevent duplicates
-    socket.removeAllListeners();
+    if (!instance.term) {
+      throw new Error('Terminal not initialized');
+    }
 
+    if (!instance.socket) {
+      throw new Error('Socket not initialized');
+    }
+
+    const term: import('xterm').Terminal = instance.term.term;
+    const socket: Socket = instance.socket;
+
+    // var resolveConenct: () => void;
+    // let deferfedConnect=new Promise<void>((resolve, reject) => {
+    //   resolveConenct=resolve;
+    // })
+
+    // Set up basic event handlers
     socket.on('connect', () => {
       console.log(`Terminal WebSocket connected for ${instance.id}`);
-      instance.connected = true;
-      this.setInstance(instance.id, instance);
-      instance.onConnectionChange?.(true);
       term.writeln('\r\n\x1b[1;32mConnected to terminal server\x1b[0m');
-
-      // Request to attach to the existing terminal by ID
-      console.log(`Requesting to attach to terminal ID: ${instance.id}`);
-      socket.emit('attach', {
-        terminalId: instance.id,
-        // Include additional connection info
-        clientId: `client-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-        readOnly: false // Option for read-only connections if needed
-      });
+      socket.emit('attach', { id: instance.id });
+      // resolveConenct()
+      // instance.onConnectionChange?.(true);
     });
 
-    socket.on('connect_error', (err) => {
-      console.error('Terminal WebSocket connection error:', err);
-      term.writeln('\r\n\x1b[1;31mConnection error: ' + err.message + '\x1b[0m');
-      instance.connected = false;
-      this.setInstance(instance.id, instance);
-      instance.onConnectionChange?.(false);
+
+    socket.on('connected', (data: TerminalSessionInfo) => {
+      console.log('Terminal session connected:', data);
+      // term.writeln('\r\n\x1b[1;32mTerminal session established\x1b[0m');
+      instance.connected=true;
+
+      // If server sent connection count info, show it
+      // if (data.connectionCount && data.connectionCount > 1) {
+      //   term.writeln(`\r\n\x1b[1;33mThere are ${data.connectionCount} active connections to this terminal\x1b[0m\r\n`);
+      // } else {
+      //   term.writeln('\r\n');
+      // }
+
+      // Update the instance with connection count info
+      // if (instance.connectionCount !== undefined) {
+      //   instance.connectionCount = data.connectionCount;
+      //   this.setInstance(instance.id, instance);
+      // }
     });
 
     socket.on('output', (data: string) => {
-      console.log(`Received ${data.length} bytes of output from server`);
       term.write(data);
     });
 
-    socket.on('connected', (data: { connectionCount?: number }) => {
-      console.log('Terminal session connected:', data);
-      term.writeln('\r\n\x1b[1;32mTerminal session established\x1b[0m');
+    socket.on('size', (size: { cols: number, rows: number }) => {
+      term.resize(size.cols, size.rows)
+    });
 
-      // If server sent connection count info, show it
-      if (data.connectionCount && data.connectionCount > 1) {
-        term.writeln(`\r\n\x1b[1;33mThere are ${data.connectionCount} active connections to this terminal\x1b[0m\r\n`);
-      } else {
-        term.writeln('\r\n');
-      }
-
-      // Update the instance with connection count info
-      if (instance.ptyInfo && data.connectionCount !== undefined) {
-        instance.ptyInfo.connectionCount = data.connectionCount;
-        this.setInstance(instance.id, instance);
-      }
+    socket.on('refresh', (data: string) => {
+      term.clear()
+      term.write(data);
     });
 
     socket.on('disconnect', () => {
       console.log(`Terminal WebSocket disconnected for ${instance.id}`);
       instance.connected = false;
-
-      // The PTY terminal may still exist on the server with other connections
-      // We just update our local connection state
-      if (instance.ptyInfo && instance.ptyInfo.connectionCount) {
-        instance.ptyInfo.connectionCount = Math.max(0, instance.ptyInfo.connectionCount - 1);
-      }
-
       this.setInstance(instance.id, instance);
-      instance.onConnectionChange?.(false);
+      // instance.onConnectionChange?.(false);
       term.writeln('\r\n\x1b[1;31mDisconnected from terminal\x1b[0m');
     });
+
+
+    socket.on('connect_error', (err) => {
+      console.error('Terminal WebSocket connection error:', err);
+      term.writeln('\r\n\x1b[1;31mConnection error: ' + err.message + '\x1b[0m');
+      instance.connected = false;
+      //  this.setInstance(instance.id, instance); // is this to update react
+      // instance.onConnectionChange?.(false);
+    });
+
 
     socket.on('error', (err: string) => {
       console.error('Terminal WebSocket error:', err);
@@ -586,27 +594,28 @@ export class TerminalManagerClass {
 
       // Remove the instance from our map
       this.instances.delete(instance.id);
-      this.notifyListeners();
+      // this.notifyListeners();
 
       term.writeln('\r\n\x1b[1;31mTerminal closed by server\x1b[0m');
-      instance.onConnectionChange?.(false);
+      socket.disconnect();
+      // instance.onConnectionChange?.(false);
     });
 
     // Listen for connection count updates from server
-    socket.on('connectionCountChanged', (data: { count: number }) => {
-      console.log(`Terminal ${instance.id} connection count changed to ${data.count}`);
+    // socket.on('connectionCountChanged', (data: { count: number }) => {
+    //   console.log(`Terminal ${instance.id} connection count changed to ${data.count}`);
 
-      // Update the instance with new connection count
-      if (instance.ptyInfo) {
-        instance.ptyInfo.connectionCount = data.count;
-        this.setInstance(instance.id, instance);
-      }
+    //   // // Update the instance with new connection count
+    //   // if (instance.connectionCount) {
+    //   //   instance.connectionCount = data.count;
+    //   //   this.setInstance(instance.id, instance);
+    //   // }
 
-      // Show message in terminal
-      if (data.count > 1) {
-        term.writeln(`\r\n\x1b[1;33mThere are now ${data.count} active connections to this terminal\x1b[0m`);
-      }
-    });
+    //   // Show message in terminal
+    //   if (data.count > 1) {
+    //     term.writeln(`\r\n\x1b[1;33mThere are now ${data.count} active connections to this terminal\x1b[0m`);
+    //   }
+    // });
 
     // Handle input from terminal
     term.onData((data: string) => {
@@ -619,11 +628,11 @@ export class TerminalManagerClass {
     // Update last used timestamp
     instance.lastUsed = new Date();
     this.setInstance(instance.id, instance);
+    // await deferfedConnect;
   }
 
   // Detach a terminal from the DOM without disposing it
   detachTerminal(instance: TerminalInstance): void {
-
   }
 
   // Reattach a terminal to the DOM
@@ -641,43 +650,41 @@ export class TerminalManagerClass {
     return Array.from(this.instances.values());
   }
 
+  // // Add a listener for terminal instance changes
+  // addListener(callback: () => void): void {
+  //   this.listeners.push(callback);
+  // }
 
+  // // Remove a listener
+  // removeListener(callback: () => void): void {
+  //   this.listeners = this.listeners.filter(listener => listener !== callback);
+  // }
 
-  // Add a listener for terminal instance changes
-  addListener(callback: () => void): void {
-    this.listeners.push(callback);
-  }
-
-  // Remove a listener
-  removeListener(callback: () => void): void {
-    this.listeners = this.listeners.filter(listener => listener !== callback);
-  }
-
-  // Notify all listeners of changes
-  private notifyListeners(): void {
-    this.listeners.forEach(listener => listener());
-  }
+  // // Notify all listeners of changes
+  // private notifyListeners(): void {
+  //   this.listeners.forEach(listener => listener());
+  // }
 
   // Clean up old instances (can be called periodically)
-  cleanupOldInstances(maxAgeMinutes: number = 30): void {
-    const now = new Date();
-    for (const [key, instance] of this.instances.entries()) {
-      const ageMinutes = (now.getTime() - instance.lastUsed.getTime()) / (1000 * 60);
-      if (ageMinutes > maxAgeMinutes) {
-        // Disconnect socket if it exists
-        if (instance.socket && instance.socket.connected) {
-          instance.socket.disconnect();
-        }
-        // Dispose terminal if it exists
-        if (instance.term && instance.term.dispose) {
-          instance.term.dispose();
-        }
-        // Remove instance
-        this.instances.delete(key);
-      }
-    }
-    this.notifyListeners();
-  }
+  // cleanupOldInstances(maxAgeMinutes: number = 30): void {
+  //   const now = new Date();
+  //   for (const [key, instance] of this.instances.entries()) {
+  //     const ageMinutes = (now.getTime() - instance.lastUsed.getTime()) / (1000 * 60);
+  //     if (ageMinutes > maxAgeMinutes) {
+  //       // Disconnect socket if it exists
+  //       if (instance.socket && instance.socket.connected) {
+  //         instance.socket.disconnect();
+  //       }
+  //       // Dispose terminal if it exists
+  //       if (instance.term && instance.term.dispose) {
+  //         instance.term.dispose();
+  //       }
+  //       // Remove instance
+  //       this.instances.delete(key);
+  //     }
+  //   }
+  //   this.notifyListeners();
+  // }
 }
 
 

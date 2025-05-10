@@ -46,12 +46,12 @@ export const StartupManagerProvider: React.FC<StartupManagerProviderProps> = ({
   wsUrl 
 }) => {
   const [tabsManager] = useState(() => new TabsManagerClass());
-  const [client, setClient] = useState<WebSocketClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [programs, setPrograms] = useState<ProgramState[]>([]);
   const [terminalManager, setTerminalManager] = useState<TerminalManagerClass>(new TerminalManagerClass(null, tabsManager));
+  const [client, setClient] = useState<WebSocketClient | null>(null);
 
   // Create WebSocket client instance
   useEffect(() => {
@@ -59,8 +59,11 @@ export const StartupManagerProvider: React.FC<StartupManagerProviderProps> = ({
 
     const ws = new WebSocketClient({
       url: wsUrl,
-      credentials: { username: '', password: '' }
+      credentials: { username: '', password: '' },
+      terminalManager
     });
+    terminalManager.setClientWebSocket(ws);
+
 
     ws.onConnected(() => {
       setIsConnected(true);
@@ -123,7 +126,7 @@ export const StartupManagerProvider: React.FC<StartupManagerProviderProps> = ({
     client['options'].credentials = { username, password };
     
     try {
-      await client.connect();
+      await client.connect( );
       setIsAuthenticated(true);
       await refreshPrograms();
     } catch (err) {
