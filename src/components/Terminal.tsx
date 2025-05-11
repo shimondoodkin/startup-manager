@@ -90,10 +90,10 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
     <div className="flex flex-col h-full">
       <div className="flex justify-between items-center p-2 border-b" style={{ background: 'var(--header-bg)', borderColor: 'var(--border-color)' }}>
         <div className="flex items-center">
-          <h4 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{terminalInstance?.programName ? `${terminalInstance.programName} Terminal` : 'Terminal'}</h4>
-          {terminalInstance && terminalInstance.id && <p className="text-xs ml-2" style={{ color: 'var(--foreground)', opacity: 0.7 }}>ID: {terminalInstance.id}</p>}
-          {isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Connected</span>}
-          {!isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded-full">Disconnected</span>}
+          {/* <h4 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{terminalInstance?.programName ? `${terminalInstance.programName} Terminal` : 'Terminal'}</h4>
+          {terminalInstance && terminalInstance.id && <p className="text-xs ml-2" style={{ color: 'var(--foreground)', opacity: 0.7 }}>ID: {terminalInstance.id}</p>} */}
+          {isConnected && <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 dark:bg-transparent dark:text-green-40 rounded-full">Connected</span>}
+          {!isConnected && <span className="px-2 py-0.5 text-xs bg-red-100 text-red-800 dark:bg-transparent dark:text-red-40 rounded-full">Disconnected</span>}
           {/* {terminalInstance?.connectionCount && terminalInstance.connectionCount > 1 && (
             <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full">
               {terminalInstance.connectionCount} connections
