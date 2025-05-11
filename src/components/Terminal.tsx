@@ -24,10 +24,10 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
   const terminalRef = useRef<HTMLDivElement>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [terminated, setTerminated] = useState(false);
 
 
   useEffect(() => {
-
     terminalManager.ensureTerminalInitialized(terminalInstance);
 
     if (terminalInstance?.inittialized) {
@@ -71,7 +71,18 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
     if (terminalInstance.socket && terminalInstance.socket.connected) {
       terminalInstance.socket.emit('refresh', { id: terminalInstance.id }); // Send Ctrl+L to refresh screen
     }
+  };
 
+  // Handle terminate button click
+  const handleTerminate = async () => {
+    try {
+      setError(null);
+      await terminalManager.closeTerminal(terminalInstance.id);
+      setTerminated(true);
+      // Optionally: update tab closability here if API exists
+    } catch (err: any) {
+      setError('Failed to terminate terminal.');
+    }
   };
 
   return (
@@ -92,8 +103,16 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
           <button
             onClick={handleRefresh}
             className="mr-2 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
+            disabled={terminated}
           >
             Refresh
+          </button>
+          <button
+            onClick={handleTerminate}
+            className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none"
+            disabled={terminated}
+          >
+            Terminate
           </button>
         </div>
       </div>
@@ -102,6 +121,11 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
         className="flex-grow bg-black"
         style={{ height: 'calc(100vh - 150px)' }}
       ></div>
+      {terminated && (
+        <div className="p-2 text-sm text-gray-700 bg-red-100">
+          Terminal has been terminated.
+        </div>
+      )}
       {error && (
         <div className="p-2 text-sm text-red-500 bg-red-100">
           Error: {error}
