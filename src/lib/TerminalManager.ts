@@ -48,6 +48,9 @@ import type { WebSocketClient } from './WebSocketClient';
 import { TabsManagerClass } from './TabsManager';
 
 export class TerminalManagerClass {
+  terminalExited(data: { id: number; }) {
+    this.removeInstance(data.id);
+  }
 
 
   private client: WebSocketClient | null;
@@ -160,7 +163,7 @@ export class TerminalManagerClass {
       id: `terminal-${instance.id}`,
       type: 'terminal',
       title: `Terminal ${instance.id}${instance.titleNote ? '[' + instance.titleNote + ']' : ''}${instance.programName ? ': ' + instance.programName : ''}`,
-      closable: true,
+      closable: false,
       terminalInstance: instance,
       active: active,
     });
@@ -300,9 +303,9 @@ export class TerminalManagerClass {
     const instance = this.instances.get(id);
     if (instance) {
 
-      if (this.client && this.client.connected) {
-        this.client.emit('detach', { id: instance.id });
-      }
+      // if (this.client && this.client.connected) {
+      //   this.client.emit('detach', { id: instance.id });
+      // }
 
       // Dispose terminal if it exists
       if (instance.term && instance.term.dispose) {

@@ -181,7 +181,7 @@ export class TerminalServer {
   }
 
   // Create a new terminal (for RPC)
-  public createTerminal({ shell, titleNote }: {  shell?: string, titleNote?: string }): TerminalSessionInfo {
+  public createTerminal({ shell, titleNote }: { shell?: string, titleNote?: string }): TerminalSessionInfo {
     const terminalId = this.nextTerminalId++;
     let command: string[];
     if (shell) {
@@ -208,7 +208,7 @@ export class TerminalServer {
       initialCommand: command,
       buffer,
       programName: '',
-      titleNote: titleNote || '', 
+      titleNote: titleNote || '',
     };
     this.terminals.push(terminal);
     // Handle PTY output
@@ -224,10 +224,14 @@ export class TerminalServer {
 
     ptyProcess.onExit(() => {
       this.broadcastOutput(terminal, '\r\n\x1b[1;31mTerminal process exited\x1b[0m\r\n');
-      this.terminals.splice(this.terminals.findIndex(t => t.id === terminalId), 1);
       terminal.connections.map((socket) => {
-        socket.emit('terminal_exited');
+        socket.emit('terminal_exited', { id: terminal.id });
       });
+      terminal.connections.length = 0;
+      let terminalFound = this.terminals.indexOf(terminal);
+      if (terminalFound !== -1) {
+        this.terminals.splice(terminalFound, 1);
+      }
       this.broadcastTerminalListChanged();
     });
 
@@ -246,7 +250,7 @@ export class TerminalServer {
       pid: terminal.ptyProcess.pid,
       programName: terminal.programName || '',
       createdAt: terminal.createdAt,
-      titleNote: terminal.titleNote || '', 
+      titleNote: terminal.titleNote || '',
     };
   }
 
@@ -301,7 +305,7 @@ export class TerminalServer {
 
     // Emit terminal_closed event to all connections
     terminal.connections.forEach((socket) => {
-      socket.emit('terminal_closed');
+      socket.emit('terminal_exited', { id: terminal.id });
     });
 
     // Properly await all socket disconnections

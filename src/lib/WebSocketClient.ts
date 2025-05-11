@@ -107,6 +107,13 @@ export class WebSocketClient {
           if (this.terminalManager) this.terminalManager.programNameChanged(data);
         });
 
+        
+
+        this.on('terminal_exited', (data: { id: number }) => {
+          console.log('Received terminal_exited notification', data);
+          if (this.terminalManager) this.terminalManager.terminalExited(data);
+        });
+
         this.socket.on('notification', (notification: RPCNotification) => {
           console.log('Received notification:', notification.method, notification.params);
 
