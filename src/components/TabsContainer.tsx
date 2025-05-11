@@ -2,15 +2,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { TabInstance } from '@/lib/TabsManager';
-
 import { ProgramState } from '@/lib/Program';
 import { useStartupManager } from '@/lib/StartupManagerContext';
+import { useTheme } from '@/lib/ThemeContext';
+import { ThemeToggle } from './ThemeToggle';
 import { ProgramList } from './ProgramList';
 import { ProgramForm } from './ProgramForm';
 import { Terminal } from './Terminal';
 
 export const TabsContainer: React.FC = () => {
   const { terminalManager, tabsManager } = useStartupManager();
+  const { theme } = useTheme();
   const [tabs, setTabs] = useState<TabInstance[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
@@ -145,13 +147,15 @@ export const TabsContainer: React.FC = () => {
           <div className="mb-4 flex justify-end space-x-4">
             <button
               onClick={handleOpenTerminalTab}
-              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+              className="px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2"
+              style={{ background: 'var(--btn-terminal-bg)', color: 'var(--btn-terminal-text)' }}
             >
               Open Terminal
             </button>
             <button
               onClick={handleAddProgram}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              className="px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2"
+              style={{ background: 'var(--btn-start-bg)', color: 'var(--btn-start-text)' }}
             >
               Add Program
             </button>
@@ -222,38 +226,47 @@ export const TabsContainer: React.FC = () => {
   }, [client, isAuthenticated, terminalManager]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tab headers */}
-      <div className="flex border-b border-gray-200 overflow-x-auto">
-        {tabs.map((tab: TabInstance) => (
+  <div className="h-screen overflow-hidden" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
+    <div className="overflow-x-auto border-b flex justify-between items-center" style={{ background: 'var(--header-bg)', borderColor: 'var(--border-color)' }}>
+      <div className="flex flex-1">
+        {tabs.map((tab) => (
           <div
             key={tab.id}
-            className={`px-4 py-2 cursor-pointer flex items-center whitespace-nowrap ${tab.active
-              ? 'border-b-2 border-indigo-500 text-indigo-600'
-              : 'text-gray-600 hover:text-gray-800'
-              }`}
+            className={`px-4 py-2 text-sm font-medium border-r cursor-pointer`}
+            style={{
+              borderColor: 'var(--border-color)',
+              background: tab.active ? 'var(--card-bg)' : 'var(--header-bg)',
+              color: tab.active ? 'var(--foreground)' : 'var(--foreground)',
+              opacity: tab.active ? 1 : 0.7,
+              borderBottom: tab.active ? '2px solid #6366f1' : 'none'
+            }}
             onClick={() => handleActivateTab(tab.id)}
           >
-            <span>{tab.title}</span>
-            {tab.closable && (
-              <button
-                className="ml-2 text-gray-400 hover:text-gray-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCloseTab(tab.id);
-                }}
-              >
-                &times;
-              </button>
-            )}
+            <div className="flex items-center space-x-2">
+              <span>{tab.title}</span>
+              {tab.closable && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseTab(tab.id);
+                  }}
+                  className="hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full h-4 w-4 flex items-center justify-center"
+                  style={{ color: 'var(--foreground)' }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
-
-      {/* Tab content */}
-      <div className="flex-grow overflow-auto p-4">
-        {renderActiveTabContent()}
+      <div className="p-2 mr-2">
+        <ThemeToggle />
       </div>
     </div>
-  );
+    <div className="p-4 overflow-y-auto" style={{ height: 'calc(100vh - 41px)', background: 'var(--background)' }}>
+      {renderActiveTabContent()}
+    </div>
+  </div>
+);
 };

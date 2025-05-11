@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { StartupManagerProvider } from '@/lib/StartupManagerContext';
+import { ThemeProvider } from '@/lib/ThemeContext';
 import { LoginForm } from './LoginForm';
 import { TabsContainer } from './TabsContainer';
 
@@ -26,12 +27,14 @@ export const App: React.FC = () => {
   }
   
   return (
-    <StartupManagerProvider wsUrl={wsUrl}>
-      {!isAuthenticated ? (
-        <LoginForm onLoginSuccess={() => setIsAuthenticated(true)} />
-      ) : (
-        <TabsContainer />
-      )}
-    </StartupManagerProvider>
+    <ThemeProvider>
+      <StartupManagerProvider wsUrl={wsUrl}>
+        {!isAuthenticated ? (
+          <LoginForm onLoginSuccess={() => setIsAuthenticated(true)} />
+        ) : (
+          <TabsContainer />
+        )}
+      </StartupManagerProvider>
+    </ThemeProvider>
   );
 };

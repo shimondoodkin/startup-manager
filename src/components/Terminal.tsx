@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 
 import { useStartupManager } from '@/lib/StartupManagerContext';
-
+import { useTheme } from '@/lib/ThemeContext';
 import { TerminalInstance } from '@/lib/TerminalManager';
 
 // Import xterm CSS only on the client side
@@ -21,6 +21,7 @@ interface TerminalProps {
 
 export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance }) => {
   const { terminalManager } = useStartupManager();
+  const { theme } = useTheme();
   const terminalRef = useRef<HTMLDivElement>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,10 +88,10 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center p-2 bg-gray-100 border-b">
+      <div className="flex justify-between items-center p-2 border-b" style={{ background: 'var(--header-bg)', borderColor: 'var(--border-color)' }}>
         <div className="flex items-center">
-          <h4 className="text-sm font-semibold">{terminalInstance?.programName ? `${terminalInstance.programName} Terminal` : 'Terminal'}</h4>
-          {terminalInstance && terminalInstance.id && <p className="text-xs text-gray-500 ml-2">ID: {terminalInstance.id}</p>}
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{terminalInstance?.programName ? `${terminalInstance.programName} Terminal` : 'Terminal'}</h4>
+          {terminalInstance && terminalInstance.id && <p className="text-xs ml-2" style={{ color: 'var(--foreground)', opacity: 0.7 }}>ID: {terminalInstance.id}</p>}
           {isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Connected</span>}
           {!isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded-full">Disconnected</span>}
           {/* {terminalInstance?.connectionCount && terminalInstance.connectionCount > 1 && (
@@ -122,12 +123,12 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
         style={{ height: 'calc(100vh - 150px)' }}
       ></div>
       {terminated && (
-        <div className="p-2 text-sm text-gray-700 bg-red-100">
+        <div className="p-2 text-sm" style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--foreground)' }}>
           Terminal has been terminated.
         </div>
       )}
       {error && (
-        <div className="p-2 text-sm text-red-500 bg-red-100">
+        <div className="p-2 text-sm text-red-500" style={{ background: 'rgba(220, 38, 38, 0.1)' }}>
           Error: {error}
         </div>
       )}

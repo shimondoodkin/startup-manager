@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { useStartupManager } from '@/lib/StartupManagerContext';
+import { useTheme } from '@/lib/ThemeContext';
+import { ThemeToggle } from './ThemeToggle';
 
 interface LoginFormProps {
   onLoginSuccess: () => void;
@@ -9,6 +11,7 @@ interface LoginFormProps {
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
   const { login, error } = useStartupManager();
+  const { theme } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,11 +39,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-md">
+    <div className="flex flex-col items-center justify-center min-h-screen" style={{ background: 'var(--background)' }}>
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
+      <div className="w-full max-w-md p-8 space-y-8 rounded-lg shadow-md" style={{ background: 'var(--card-bg)', borderColor: 'var(--border-color)' }}>
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Startup Manager</h1>
-          <p className="mt-2 text-gray-600">Sign in to manage your programs</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>Startup Manager</h1>
+          <p className="mt-2" style={{ color: 'var(--foreground)', opacity: 0.7 }}>Sign in to manage your programs</p>
         </div>
         
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -51,7 +57,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
           )}
           
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="username" className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Username
             </label>
             <input
@@ -61,12 +67,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              style={{ background: 'var(--input-bg)', borderColor: 'var(--input-border)', color: 'var(--foreground)' }}
+              className="block w-full px-3 py-2 mt-1 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
           
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="password" className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Password
             </label>
             <input
@@ -76,7 +83,8 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              style={{ background: 'var(--input-bg)', borderColor: 'var(--input-border)', color: 'var(--foreground)' }}
+              className="block w-full px-3 py-2 mt-1 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
           
