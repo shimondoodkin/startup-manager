@@ -25,6 +25,7 @@ export type TabInstance = ListTabInstance | FormTabInstance | TerminalTabInstanc
 
 // Singleton class to manage tabs
 export class TabsManagerClass {
+ 
   private tabs: TabInstance[] = [];
   private activeTabId: string | null = null;
   private listeners: Array<() => void> = [];

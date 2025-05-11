@@ -22,14 +22,6 @@ export interface RPCNotification {
   method: string;
   params: any;
 }
-
-interface AuthToken {
-  token: string;
-  socketId: string;
-  createdAt: Date;
-  expiresAt: Date;
-}
-
 export class WebSocketServer {
   private io: Namespace;
   private programManager: ProgramManager;
@@ -39,7 +31,6 @@ export class WebSocketServer {
     username: process.env.ADMIN_USERNAME || 'admin',
     password: process.env.ADMIN_PASSWORD || 'password'
   };
-  private authTokens: AuthToken[] = [];
   
   constructor(namespace: Namespace) {
     this.io = namespace;
@@ -55,8 +46,6 @@ export class WebSocketServer {
     this.setupSocketHandlers();
     this.startMonitoring();
     
-    // Clean expired tokens every minute
-    setInterval(() => this.cleanExpiredTokens(), 60000);
   }
   
   private setupSocketHandlers() {
@@ -95,12 +84,13 @@ export class WebSocketServer {
           callback({ id: request.id, error: error instanceof Error ? error.message : 'Unknown error' });
         }
       });
-      
+
+      const onDisconnect: ()=>void = this.terminalServer?.setupSocketHandlers(socket) || (() => {});
       socket.on('disconnect', () => {
         console.log(`Client disconnected: ${socket.id}`);
-        // Remove all tokens for this socket when it disconnects
-        this.authTokens = this.authTokens.filter(t => t.socketId !== socket.id);
+        onDisconnect();
       });
+
     });
   }
   
@@ -160,13 +150,7 @@ export class WebSocketServer {
         if (!cmdProgram) throw new Error(`Program with id ${params.id} not found`);
         const sent = await cmdProgram.sendCommandToScreen(params.command);
         return { success: sent, state: cmdProgram.getState() };
-      
-      case 'generateTerminalToken':
-        return this.generateAuthToken(socketId);
-        
-      case 'validateTerminalToken':
-        return { valid: this.validateAuthToken(params.token) };
-        
+
       case 'listTerminals':
         if (!this.terminalServer) {
           throw new Error('Terminal server not initialized');
@@ -178,14 +162,9 @@ export class WebSocketServer {
           throw new Error('Terminal server not initialized');
         }
         // Create a terminal with the provided options (screenName or shell)
-        const { screenName, shell } = params;
-        const token = this.generateAuthToken(socketId).token;
-        const terminalInfo = this.terminalServer.createTerminal({ screenName, shell });
-        return {
-          token,
-          terminalId: terminalInfo.id
-        };
-
+        const { shell } = params;
+        const terminalInfo = this.terminalServer.createTerminal({ shell });
+        return terminalInfo;
         
       case 'getTerminalInfo':
         if (!this.terminalServer) {
@@ -264,58 +243,4 @@ export class WebSocketServer {
     this.io.disconnectSockets(true);
   }
   
-  // Token management methods
-  private generateAuthToken(socketId: string): { token: string, expiresIn: number } {
-    // Generate a random token
-    const token = uuidv4();
-    const now = new Date();
-    // Token expires in 5 minutes
-    const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
-    
-    // Store the token
-    this.authTokens.push({
-      token,
-      socketId,
-      createdAt: now,
-      expiresAt
-    });
-    
-    console.log(`Generated new auth token for socket ${socketId}, expires at ${expiresAt.toISOString()}`);
-    
-    // Return token and expiration time (in seconds)
-    return { 
-      token, 
-      expiresIn: Math.floor((expiresAt.getTime() - now.getTime()) / 1000)
-    };
-  }
-  
-  public validateAuthToken(token: string): boolean {
-    const now = new Date();
-    const authToken = this.authTokens.find(t => t.token === token);
-    
-    if (!authToken) {
-      console.log(`Token validation failed: token not found`);
-      return false;
-    }
-    
-    if (authToken.expiresAt < now) {
-      console.log(`Token validation failed: token expired at ${authToken.expiresAt.toISOString()}`);
-      return false;
-    }
-    
-    console.log(`Token validated successfully for socket ${authToken.socketId}`);
-    return true;
-  }
-  
-  private cleanExpiredTokens() {
-    const now = new Date();
-    const initialCount = this.authTokens.length;
-    
-    this.authTokens = this.authTokens.filter(token => token.expiresAt > now);
-    
-    const removedCount = initialCount - this.authTokens.length;
-    if (removedCount > 0) {
-      console.log(`Cleaned up ${removedCount} expired auth tokens`);
-    }
-  }
 }

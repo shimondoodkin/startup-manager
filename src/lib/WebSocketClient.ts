@@ -38,7 +38,7 @@ export class WebSocketClient {
       console.warn('WebSocketClient: Attempted to emit on disconnected socket:', event, args);
     }
   }
-  private connected = false;
+  public connected = false;
   private options: WebSocketClientOptions;
   private requestMap = new Map<string, { resolve: Function, reject: Function }>();
   private statusChangeHandler: ((program: any) => void) | null = null;
@@ -56,6 +56,7 @@ export class WebSocketClient {
   }
 
   async connect(): Promise<void> {
+
     if (this.socket) {
       this.socket.close();
       this.socket = null;
@@ -100,6 +101,12 @@ export class WebSocketClient {
           console.log('Received terminalsChanged notification');
           if (this.terminalManager) this.terminalManager.updateTerminalInstancesFromServer();
         });
+
+        this.on('programNameChanged', (data: { terminalId: number, programName: string }) => {
+          console.log('Received programNameChanged notification', data);
+          if (this.terminalManager) this.terminalManager.programNameChanged(data);
+        });
+
         this.socket.on('notification', (notification: RPCNotification) => {
           console.log('Received notification:', notification.method, notification.params);
 

@@ -66,98 +66,12 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
     setIsConnected(!!terminalInstance?.connected);
   }, [terminalInstance, terminalInstance?.connected]);
 
-  // Handle connect button click - adds client to list of connections for a PTY terminal
-  const handleConnect = async () => {
-
-    // if (!terminalInstance) return;
-
-    // try {
-    //   // Connect to the terminal if not already connected
-    //   if (!terminalInstance.socket || !terminalInstance.socket.connected) {
-    //     if (terminalInstance.term) {
-    //       const socket = await terminalManager.connectTerminal(terminalInstance, terminalInstance.term.term);
-    //       setIsConnected(terminalInstance.connected);
-
-    //       // Set up event handlers
-    //       terminalManager.setupTerminalEvents(
-    //         terminalInstance,
-    //         terminalInstance.term.term,
-    //         socket,
-    //         (connected) => setIsConnected(connected)
-    //       );
-    //     }
-    //   } else {
-    //     console.log('Terminal is already connected');
-    //     if (terminalInstance.term && terminalInstance.term.term) {
-    //       terminalInstance.term.term.writeln('\r\n\x1b[1;33mAlready connected to terminal\x1b[0m');
-    //     }
-    //   }
-    // } catch (err) {
-    //   console.error('Failed to connect terminal:', err);
-    //   setError('Failed to connect terminal');
-    // }
-  };
-
-  // Handle disconnect button click - removes client from list of connections for a PTY terminal
-  const handleDisconnect = () => {
-    // if (!terminalInstance) return;
-
-    // try {
-    //   // If there's an existing socket, disconnect it
-    //   if (terminalInstance.socket && terminalInstance.socket.connected) {
-    //     console.log(`Disconnecting socket for terminal ${terminalInstance.id}`);
-    //     terminalInstance.socket.disconnect();
-    //     setIsConnected(false);
-
-    //     if (terminalInstance.term && terminalInstance.term.term) {
-    //       terminalInstance.term.term.writeln('\r\n\x1b[1;31mDisconnected from terminal\x1b[0m');
-    //     }
-    //   } else {
-    //     console.log('Terminal is already disconnected');
-    //   }
-    // } catch (err) {
-    //   console.error('Error disconnecting terminal:', err);
-    //   setError('Error disconnecting terminal');
-    // }
-  };
-
   // Handle refresh button click - full refresh of terminal state
   const handleRefresh = async () => {
-    // if (!terminalInstance) return;
-
     if (terminalInstance.socket && terminalInstance.socket.connected) {
-      // terminalInstance.socket.emit('input', '\x0c'); // Send Ctrl+L to refresh screen
-      terminalInstance.socket.emit('refresh'); // Send Ctrl+L to refresh screen
+      terminalInstance.socket.emit('refresh', { id: terminalInstance.id }); // Send Ctrl+L to refresh screen
     }
 
-    // try {
-    //   // If there's an existing socket, disconnect it first
-    //   if (terminalInstance.socket && terminalInstance.socket.connected) {
-    //     terminalInstance.socket.disconnect();
-    //   }
-
-    //   // Reconnect
-    //   if (terminalInstance.term) {
-    //     const socket = await terminalManager.connectTerminal(terminalInstance, terminalInstance.term.term);
-    //     setIsConnected(terminalInstance.connected);
-
-    //     // Set up event handlers
-    //     terminalManager.setupTerminalEvents(
-    //       terminalInstance,
-    //       terminalInstance.term.term,
-    //       socket,
-    //       (connected) => setIsConnected(connected)
-    //     );
-
-    //     // Send a refresh command (Ctrl+L) to clear the screen
-    //     if (socket.connected) {
-    //       socket.emit('input', '\x0c');
-    //     }
-    //   }
-    // } catch (err) {
-    //   console.error('Failed to refresh terminal:', err);
-    //   setError('Failed to refresh terminal');
-    // }
   };
 
   return (
@@ -165,7 +79,7 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
       <div className="flex justify-between items-center p-2 bg-gray-100 border-b">
         <div className="flex items-center">
           <h4 className="text-sm font-semibold">{terminalInstance?.programName ? `${terminalInstance.programName} Terminal` : 'Terminal'}</h4>
-          {terminalInstance && terminalInstance.id && <p className="text-xs text-gray-500 ml-2">ID: {terminalInstance.id.substring(0, 8)}...</p>}
+          {terminalInstance && terminalInstance.id && <p className="text-xs text-gray-500 ml-2">ID: {terminalInstance.id}</p>}
           {isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">Connected</span>}
           {!isConnected && <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded-full">Disconnected</span>}
           {/* {terminalInstance?.connectionCount && terminalInstance.connectionCount > 1 && (
@@ -176,31 +90,10 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose, terminalInstance })
         </div>
         <div className="flex items-center">
           <button
-            onClick={handleConnect}
-            className="mr-2 px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none"
-          >
-            Connect
-          </button>
-          <button
-            onClick={handleDisconnect}
-            className="mr-2 px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 focus:outline-none"
-            disabled={!isConnected}
-          >
-            Disconnect
-          </button>
-          <button
             onClick={handleRefresh}
             className="mr-2 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
           >
             Refresh
-          </button>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 focus:outline-none"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
           </button>
         </div>
       </div>

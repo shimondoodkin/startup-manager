@@ -15,7 +15,6 @@ export const TabsContainer: React.FC = () => {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
 
-
   useEffect(() => {
     // Initial load of tabs
     setTabs(tabsManager.getTabs());
@@ -168,6 +167,7 @@ export const TabsContainer: React.FC = () => {
     if (tab.type === 'form') {
       return (
         <ProgramForm
+          key={tab.id}
           program={tab.program}
           onCancel={handleCancelEdit}
           onSave={handleSaveProgram}
@@ -178,6 +178,7 @@ export const TabsContainer: React.FC = () => {
     if (tab.type === 'terminal') {
       return (
         <Terminal
+          key={tab.id}
           onClose={() => handleCloseTab(tab.id)}
           terminalInstance={tab.terminalInstance}
         />
@@ -228,8 +229,8 @@ export const TabsContainer: React.FC = () => {
           <div
             key={tab.id}
             className={`px-4 py-2 cursor-pointer flex items-center whitespace-nowrap ${tab.active
-                ? 'border-b-2 border-indigo-500 text-indigo-600'
-                : 'text-gray-600 hover:text-gray-800'
+              ? 'border-b-2 border-indigo-500 text-indigo-600'
+              : 'text-gray-600 hover:text-gray-800'
               }`}
             onClick={() => handleActivateTab(tab.id)}
           >

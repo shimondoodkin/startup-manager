@@ -1,33 +1,30 @@
 import { Socket, Namespace } from 'socket.io';
 import * as pty from 'node-pty';
-import { v4 as uuidv4 } from 'uuid';
 import { WebSocketServer } from './WebSocketServer';
-import { error } from 'console';
 
 interface TerminalInstance {
-  id: string;
+  id: number;
   ptyProcess: pty.IPty;
   connections: Socket[];
   createdAt: Date;
   initialCommand: string[];
   buffer: string[];
-  screenName?: string;
   programName?: string;
+  titleNote?: string; // <-- Added titleNote
 }
 
 
 export interface TerminalSessionInfo {
-  id: string;
+  id: number;
   pid: number;
   programName?: string;
   createdAt: Date;
-  //  connectionCount?: number; // Number of active connections to this PTY
+  titleNote?: string; // <-- Added titleNote
 }
 
 export class TerminalServer {
-  private io: Namespace;
   private terminals: TerminalInstance[] = [];
-  // private socketToTerminalMap: Map<string, string> = new Map(); // Maps socket ID to terminal ID
+  private nextTerminalId: number = 1;
 
   private webSocketServer: WebSocketServer | null = null;
 
@@ -36,11 +33,9 @@ export class TerminalServer {
     this.webSocketServer = webSocketServer;
   }
 
-  constructor(namespace: Namespace) {
-    this.io = namespace;
+  constructor() {
 
     console.log('TerminalServer initialized');
-    this.setupSocketHandlers();
 
     // Periodically check program name for all open PTYs every 3 seconds
     setInterval(() => {
@@ -71,101 +66,105 @@ export class TerminalServer {
     });
   }
 
+  public setupSocketHandlers(socket: Socket) {
 
+    console.log(`Terminal client connected: ${socket.id}`);
 
-  private setupSocketHandlers() {
+    // let attachedTerminals: { [id: string]: TerminalInstance } = {};
 
+    // socket.emit('output', { id: null, data: '\r\n\x1b[1;32mTerminal connected. Waiting for screen attachment...\x1b[0m\r\n' });
 
-    this.io.use((socket, next) => {
-      const { token } = socket.handshake.auth;
-
-      console.log(`Terminal auth attempt with token: ${token ? token.substring(0, 8) + '...' : 'none'}`);
-
-      if (!token) {
-        console.error(`Terminal authentication failed: no token provided`);
-        return next(new Error('Authentication failed: No token provided'));
+    socket.on('attach', (data: { id: number }) => {
+      const term = this.terminals.find((t) => t.id === data.id);
+      if (!term) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal ID missing or terminal not found' });
+        return;
       }
 
-      // Validate token with WebSocketServer
-      try {
-        // Use a direct import of the WebSocketServer validation method
-        // This assumes WebSocketServer is a singleton and accessible here
+      if (term.connections.indexOf(socket) !== -1) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal already attached to this connection' });
 
-        if (!this.webSocketServer) {
-          console.error('Cannot validate token: WebSocketServer instance not available');
-          return next(new Error('Server configuration error'));
-        }
+        // attachedTerminals[data.id] = term;
+        socket.emit('output', { id: term.id, data: term.buffer.join('') });
+        socket.emit('connected', {
+          id: term.id,
+          pid: term.ptyProcess.pid,
+          programName: term.programName,
+          createdAt: term.createdAt,
+        });
 
-        const isValid = this.webSocketServer.validateAuthToken(token);
-
-        if (!isValid) {
-          console.error(`Terminal authentication failed: invalid or expired token`);
-          return next(new Error('Authentication failed: Invalid or expired token'));
-        }
-
-        console.log(`Terminal authentication successful with token`);
-        next();
-      } catch (error) {
-        console.error(`Error validating token:`, error);
-        return next(new Error('Authentication error'));
+        return;
       }
-    });
 
-    this.io.on('connection', (socket) => {
-      console.log(`Terminal client connected: ${socket.id}`);
+      term.connections.push(socket);
 
-      let terminalRef = { terminal: null as TerminalInstance | null };
-
-      // Send initial connection success message
-      socket.emit('output', '\r\n\x1b[1;32mTerminal connected with token authentication. Waiting for screen attachment...\x1b[0m\r\n');
-
-      socket.on('attach', (data: { id?: string }) => {
-        // Accept both 'id' and 'terminalId' for compatibility
-        console.log(`Attach request received:`, data);
-        try {
-          this.AttachTerminal(socket, data, terminalRef);
-        }
-        catch (e: any) {
-          socket.emit("error", e?.message || 'no error message')
-          console.log(e?.stack)
-        }
-      });
-
-      socket.on('input', (data: string) => {
-        try {
-          if (!terminalRef?.terminal) {
-            throw new Error("terminal is not attached in this connection")
-          }
-          if (!terminalRef?.terminal?.ptyProcess) {
-            throw new Error("no pty process in this terminal")
-          }
-          terminalRef.terminal.ptyProcess.write(data);
-        }
-        catch (e: any) {
-          socket.emit("error", e?.message || 'no error message')
-          console.log(e?.stack)
-        }
-      });
-
-      socket.on('refresh', () => {
-        try {
-          if (!terminalRef?.terminal) {
-            throw new Error("terminal is not attached in this connection")
-          }
-          // Send buffer to new client
-          socket.emit('size', { cols: terminalRef.terminal.ptyProcess.cols, rows: terminalRef.terminal.ptyProcess.rows });
-          socket.emit('refresh', terminalRef.terminal.buffer.join(''));
-        }
-        catch (e: any) {
-          socket.emit("error", e?.message || 'no error message')
-          console.log(e?.stack)
-        }
-      })
-
-      socket.on('disconnect', () => {
-        terminalRef.terminal?.connections.splice(terminalRef.terminal.connections.indexOf(socket), 1);
+      // attachedTerminals[data.id] = term;
+      socket.emit('output', { id: term.id, data: term.buffer.join('') });
+      socket.emit('connected', {
+        id: term.id,
+        pid: term.ptyProcess.pid,
+        programName: term.programName,
+        createdAt: term.createdAt,
       });
     });
+
+
+    socket.on('detach', (data: { id: number }) => {
+      const term = this.terminals.find((t) => t.id === data.id);
+      if (!term) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal ID missing or terminal not found' });
+        return;
+      }
+
+      const index = term.connections.indexOf(socket);
+      if (index === -1) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal not attached to this connection' });
+        return;
+      }
+      term.connections.splice(index, 1);
+
+      socket.emit('disconnected', {
+        id: term.id,
+      });
+      return;
+    });
+
+    socket.on('input', (data: { id: number, data: string }) => {
+      const term = this.terminals.find((t) => t.id === data.id);
+
+      if (!term) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal not found' });
+        return;
+      }
+      if (term.connections.indexOf(socket) === -1) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal not attached in this connection' });
+        return;
+      }
+      term.ptyProcess.write(data.data);
+    });
+
+    socket.on('refresh', (data: { id: number }) => {
+      const term = this.terminals.find((t) => t.id === data.id);
+      if (!term) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal not found' });
+        return;
+      }
+      if (term.connections.indexOf(socket) === -1) {
+        socket.emit('error', { id: data?.id || null, data: 'Terminal not attached in this connection' });
+        return;
+      }
+      socket.emit('refresh', { id: term.id, data: term.buffer.join('') });
+    })
+
+    return () => {
+      // Clean up attached terminals for this socket
+      for (const term of this.terminals) {
+        const index = term.connections.indexOf(socket);
+        if (index !== -1) {
+          term.connections.splice(index, 1);
+        }
+      }
+    }
   }
 
 
@@ -175,20 +174,21 @@ export class TerminalServer {
     return this.terminals.map(term => ({
       id: term.id,
       pid: term.ptyProcess.pid,
-      programName: term.programName || '',
+      programName: term.programName,
       createdAt: term.createdAt,
-      // connectionCount: term.connections.length
-    } as TerminalSessionInfo));
+      titleNote: term.titleNote || '',
+    }));
   }
 
   // Create a new terminal (for RPC)
-  public createTerminal({ screenName, shell }: { screenName?: string, shell?: string }): TerminalSessionInfo {
-    const terminalId = uuidv4();
+  public createTerminal({ shell, titleNote }: {  shell?: string, titleNote?: string }): TerminalSessionInfo {
+    const terminalId = this.nextTerminalId++;
     let command: string[];
-    if (screenName) {
-      command = ['screen', '-S', screenName];
-    } else if (shell) {
-      command = [shell];
+    if (shell) {
+      // Parse shell command string into command and args using node's built-in shell-quote
+      const shellQuote = require('shell-quote');
+      // command = shellQuote.parse(shell, process.env);
+      command = shellQuote.parse(shell); // env={}
     } else {
       command = ['bash'];
     }
@@ -207,7 +207,8 @@ export class TerminalServer {
       createdAt: new Date(),
       initialCommand: command,
       buffer,
-      screenName: screenName
+      programName: '',
+      titleNote: titleNote || '', 
     };
     this.terminals.push(terminal);
     // Handle PTY output
@@ -245,7 +246,7 @@ export class TerminalServer {
       pid: terminal.ptyProcess.pid,
       programName: terminal.programName || '',
       createdAt: terminal.createdAt,
-      // connectionCount: 0
+      titleNote: terminal.titleNote || '', 
     };
   }
 
@@ -254,7 +255,7 @@ export class TerminalServer {
       terminal.connections.forEach((socket) => {
         if (socket.connected) {
           try {
-            socket.emit('output', data);
+            socket.emit('output', { id: terminal.id, data });
           } catch (error) {
             console.error(`Error sending output to client ${socket.id}:`, error);
           }
@@ -264,7 +265,7 @@ export class TerminalServer {
   }
 
   // Get info about a specific terminal (for RPC)
-  public getTerminalInfo(terminalId: string): TerminalSessionInfo | null {
+  public getTerminalInfo(terminalId: number): TerminalSessionInfo | null {
     const term = this.terminals.find(t => t.id === terminalId);
     if (!term) return null;
     return {
@@ -272,56 +273,25 @@ export class TerminalServer {
       pid: term.ptyProcess.pid,
       programName: term.programName || '',
       createdAt: term.createdAt,
-      // connectionCount: term.connections.length
     };
   }
 
-  private AttachTerminal(socket: Socket, data: { id?: string }, terminalRef: { terminal: TerminalInstance | null }) {
 
-    if (!(data.id && this.terminals.findIndex((t) => t.id === data.id) !== -1)) {
-      throw new Error("Terminal ID missing or terminal not found");
-    }
+  // private kickSocketFromTerminal(socketId: string, terminalId: string) {
+  //   const terminal = this.terminals.find((t) => t.id === terminalId);
+  //   if (!terminal) {
+  //     throw new Error('Terminal not found');
+  //   }
+  //   const socket = terminal.connections.find((s) => s.id === socketId)
+  //   if (!socket) {
+  //     throw new Error('Socket not found');
+  //   }
+  //   socket.disconnect();
+  //   // terminal.connections.splice(terminal.connections.indexOf(socket), 1);
+  //   // this.socketToTerminalMap.delete(socket.id);
+  // }
 
-    const terminal = this.terminals.find((t) => t.id === data.id)!;
-
-    terminal.connections.forEach((participating_socket) => {
-      if (participating_socket.id === socket.id) {
-        throw new Error("Socket already connected to terminal");
-      }
-    });
-
-    terminal.connections.push(socket);
-
-    // this.socketToTerminalMap.set(socket.id, terminal.id);
-
-    // Send buffer to new client
-    socket.emit('output', terminal.buffer.join(''));
-    socket.emit('connected', {
-      id: terminal.id,
-      pid: terminal.ptyProcess.pid,
-      programName: terminal.programName,
-      createdAt: terminal.createdAt,
-      // connectionCount: terminal.connections.length
-    } as TerminalSessionInfo);
-    terminalRef.terminal = terminal;
-    return;
-  }
-
-  private kickSocketFromTerminal(socketId: string, terminalId: string) {
-    const terminal = this.terminals.find((t) => t.id === terminalId);
-    if (!terminal) {
-      throw new Error('Terminal not found');
-    }
-    const socket = terminal.connections.find((s) => s.id === socketId)
-    if (!socket) {
-      throw new Error('Socket not found');
-    }
-    socket.disconnect();
-    // terminal.connections.splice(terminal.connections.indexOf(socket), 1);
-    // this.socketToTerminalMap.delete(socket.id);
-  }
-
-  public async closeTerminal(terminalId: string) {
+  public async closeTerminal(terminalId: number) {
     const terminal = this.terminals.find(t => t.id === terminalId);
     if (!terminal) {
       throw new Error("Terminal not found");
@@ -335,14 +305,14 @@ export class TerminalServer {
     });
 
     // Properly await all socket disconnections
-    await Promise.all(
-      terminal.connections.map((socket) => {
-        return new Promise<void>((resolve) => {
-          socket.disconnect(true);
-          resolve();
-        });
-      })
-    );
+    // await Promise.all(
+    //   terminal.connections.map((socket) => {
+    //     return new Promise<void>((resolve) => {
+    //       socket.disconnect(true);
+    //       resolve();
+    //     });
+    //   })
+    // );
 
     terminal.connections.length = 0;
     this.terminals.splice(this.terminals.findIndex(t => t.id === terminalId), 1);
@@ -360,9 +330,6 @@ export class TerminalServer {
         await this.closeTerminal(terminal.id);
       })
     );
-
-    // Disconnect all sockets after terminals are closed
-    this.io.disconnectSockets(true);
   }
 }
 

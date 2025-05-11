@@ -48,14 +48,13 @@ async function start() {
 
   // Create namespaces for different services
   const programsNamespace = io.of('/');
-  const terminalNamespace = io.of('/terminal');
 
   // Initialize WebSocket servers with the namespaces
   const wsServer = new WebSocketServer(programsNamespace);
   await wsServer.initialize();
 
   // Initialize Terminal server with its namespace
-  const terminalServer = new TerminalServer(terminalNamespace);
+  const terminalServer = new TerminalServer();
 
   // Connect the terminal server to the websocket server
   wsServer.setTerminalServer(terminalServer);
