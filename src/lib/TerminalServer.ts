@@ -210,6 +210,14 @@ export class TerminalServer {
       programName: '',
       titleNote: titleNote || '',
     };
+    
+    const pid = terminal.ptyProcess.pid;
+    this.getForegroundProcessName(pid).then((name) => {
+      if (name && name !== terminal.programName) {
+        terminal.programName = name;
+      }
+    });
+
     this.terminals.push(terminal);
     // Handle PTY output
 

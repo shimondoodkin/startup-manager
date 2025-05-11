@@ -162,8 +162,7 @@ export class WebSocketServer {
           throw new Error('Terminal server not initialized');
         }
         // Create a terminal with the provided options (screenName or shell)
-        const { shell } = params;
-        const terminalInfo = this.terminalServer.createTerminal({ shell });
+        const terminalInfo = this.terminalServer.createTerminal(params);
         return terminalInfo;
         
       case 'getTerminalInfo':
