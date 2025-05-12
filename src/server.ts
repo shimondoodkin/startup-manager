@@ -6,6 +6,13 @@ import { TerminalServer } from './lib/TerminalServer';
 import { parse } from 'url';
 import { join } from 'path';
 import { AddressInfo } from 'net';
+import logger, { logWithIP } from './lib/logger';
+import fs from 'fs';
+import express from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import morgan from 'morgan';
+import config from './lib/config';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -14,8 +21,6 @@ let port = parseInt(process.env.PORT || '3000', 10);
 
 
 async function start() {
-
-
   // Create Next.js app
   const app = next({ dev, hostname, port });
   const handle = app.getRequestHandler();
@@ -23,18 +28,93 @@ async function start() {
   // Prepare the Next.js app
   await app.prepare();
 
+  // Create Express app for middleware
+  const expressApp = express();
+
+  // Apply security middleware
+  expressApp.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'", 'ws:', 'wss:'],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+  }));
+
+  // Apply rate limiting
+  expressApp.use(rateLimit({
+    windowMs: Math.round(config.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000),
+    max: config.RATE_LIMIT_MAX_REQUESTS,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: 'Too many requests, please try again later',
+  }));
+
+  // Ensure logs directory exists
+  if (!fs.existsSync(config.LOG_DIR)) {
+    fs.mkdirSync(config.LOG_DIR, { recursive: true });
+  }
+
+  // Setup HTTP request logging with Morgan - only log in production if not debug level
+  const shouldLogHttp = dev || config.LOG_LEVEL === 'debug' || config.LOG_LEVEL === 'http';
+  if (shouldLogHttp) {
+    expressApp.use(morgan('combined', {
+      stream: {
+        write: (message: string) => {
+          // Extract IP address from morgan log
+          const ipMatch = message.match(/^(\S+)\s-\s/);
+          const ip = ipMatch ? ipMatch[1] : 'unknown';
+          // Only log at 'http' level to reduce noise
+          logWithIP('http', message.trim(), ip, { category: 'http' });
+        }
+      }
+    }));
+  }
 
   // Create HTTP server
   const server = createServer(async (req, res) => {
     try {
+      // Get client IP address - ensure we have a string representation
+      let ip = typeof req.headers['x-forwarded-for'] === 'string'
+        ? req.headers['x-forwarded-for'].split(',')[0].trim()
+        : Array.isArray(req.headers['x-forwarded-for'])
+          ? req.headers['x-forwarded-for'][0].trim()
+          : req.socket.remoteAddress || 'unknown';
+
+      // Security: Apply express middleware (helmet, rate limiting, etc)
+      await new Promise<void>((resolve) => {
+        expressApp(req, res); //, resolve
+      });
+
       // Parse URL
       const parsedUrl = parse(req.url!, true);
       const { pathname } = parsedUrl;
 
+      // Generate a unique request ID for tracking
+      const requestId = Math.random().toString(36).substring(2, 15);
+
+      // Only log at debug level in production to reduce noise
+      if (shouldLogHttp) {
+        logWithIP('http', `${req.method} ${pathname}`, ip.toString(), { requestId, category: 'server' });
+      }
+
+      // Attach requestId to res for downstream logging
+      (res as any).requestId = requestId;
+      (req as any).clientIP = ip; // Store client IP for easier access
+
       // Let Next.js handle the request
       await handle(req, res, parsedUrl);
     } catch (err) {
-      console.error('Error occurred handling request:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorStack = err instanceof Error ? err.stack : '';
+      logger.error('Error occurred handling request:', { error: errorMessage, stack: errorStack, requestId: (res as any).requestId, category: 'server' });
       res.statusCode = 500;
       res.end('Internal Server Error');
     }
@@ -43,7 +123,16 @@ async function start() {
   // Create a single Socket.IO server instance
   const io = new SocketIOServer(server, {
     path: '/api/programs/socket.io',
-    transports: ['websocket']
+    transports: ['websocket'],
+    // Add connection security limits
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 30000, // 30 seconds
+    },
+    // Add CORS protection in production
+    cors: process.env.NODE_ENV === 'production' ? {
+      origin: process.env.ALLOWED_ORIGINS?.split(',') || [process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'],
+      methods: ['GET', 'POST']
+    } : {}
   });
 
   // Create namespaces for different services
@@ -64,16 +153,20 @@ async function start() {
   await new Promise<void>((resolve) => { server.listen(port, resolve); });
   const address = server.address() as AddressInfo;
   port = address.port; // Update the port variable with the actual port used
-  console.log(`> Ready on http://${hostname}:${port}`);
+  logger.info(`Server started`, { port, hostname, env: process.env.NODE_ENV });
 
   process.on('uncaughtException', (err) => {
-    console.error('Uncaught exception:', err);
-    // process.exit(1);
+    logger.error('Uncaught exception:', { error: err.message, stack: err.stack });
+    // if (process.env.NODE_ENV === 'production') {
+    //   process.exit(1);
+    // }
   });
 
   process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled rejection:', reason);
-    // process.exit(1);
+    logger.error('Unhandled rejection:', { reason });
+    // if (process.env.NODE_ENV === 'production') {
+    //   process.exit(1);
+    // }
   });
 
   // Handle shutdown
@@ -82,7 +175,7 @@ async function start() {
     try {
       if (shuttingDown) return;
       shuttingDown = true;
-      console.log('Shutting down gracefully...');
+      logger.info('Shutting down gracefully...');
 
       // Close all file watchers
       const getActiveHandles = (process as any)._getActiveHandles as () => any[];
@@ -99,9 +192,9 @@ async function start() {
         if (handle.constructor.name === 'TTYWrap' && typeof handle.close === 'function') {
           try {
             handle.close();
-            console.log('Closed TTYWrap');
+            logger.debug('Closed TTYWrap');
           } catch (e) {
-            console.error('Error closing TTYWrap:', e);
+            logger.error('Error closing TTYWrap:', { error: e });
           }
         }
       }
@@ -112,13 +205,13 @@ async function start() {
         try {
           handle.unref();
         } catch (e: any) {
-          console.error('Error unref handle:', e?.stack || JSON.stringify(e));
+          logger.error('Error unref handle:', { error: e?.stack || JSON.stringify(e) });
         }
       }
       process.exit(0);
 
     } catch (e: any) {
-      console.error('Error shutting down server:', e.stack);
+      logger.error('Error shutting down server:', { error: e.stack });
       process.exit(1);
     }
   });

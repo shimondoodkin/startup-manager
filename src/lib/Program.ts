@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
+import logger from './logger';
 import treeKill from 'tree-kill';
 import { EventEmitter } from 'events';
 
@@ -90,7 +91,7 @@ export class Program extends EventEmitter {
       exec(`screen -list | grep "${this.screenName}"`, async (error, stdout) => {
         if (!error && stdout.includes(this.screenName)) {
           // Screen already exists, mark as active and resolve
-          console.log(`Screen ${this.screenName} already exists, using existing session`);
+          logger.info('program', `Screen ${this.screenName} already exists, using existing session`);
           this.screenActive = true;
           resolve(true);
           return;
@@ -99,7 +100,7 @@ export class Program extends EventEmitter {
         // Screen doesn't exist, create a new one
         exec(`screen -dmS ${this.screenName}`, async (error) => {
           if (error) {
-            console.error(`Failed to start screen for ${this.name}:`, error);
+            logger.error('program', `Failed to start screen for ${this.name}:`, error);
             resolve(false);
             return;
           }
@@ -115,7 +116,7 @@ export class Program extends EventEmitter {
     return new Promise((resolve) => {
       exec(`screen -S ${this.screenName} -X stuff "${command}\n"`, (error) => {
         if (error) {
-          console.error(`Failed to send command to screen ${this.screenName}:`, error);
+          logger.error('program', `Failed to send command to screen ${this.screenName}:`, error);
           resolve(false);
           return;
         }
@@ -136,7 +137,7 @@ export class Program extends EventEmitter {
       // First check if screen already exists and has our process running
       const existingPid = await this.findProcessPid();
       if (existingPid) {
-        console.log(`Program ${this.name} is already running with PID ${existingPid}`);
+        logger.info('program', `Program ${this.name} is already running with PID ${existingPid}`);
         this.updateStatus('running');
         return true;
       }
@@ -150,7 +151,7 @@ export class Program extends EventEmitter {
       }
       return false;
     } catch (error) {
-      console.error(`Error starting program ${this.name}:`, error);
+      logger.error('program', `Error starting program ${this.name}:`, error);
       this.updateStatus('error');
       return false;
     }
@@ -158,15 +159,15 @@ export class Program extends EventEmitter {
   
   async stop(): Promise<boolean> {
     try {
-      console.log(`Stopping program ${this.name} (screen: ${this.screenName}) using method: ${this.stopMethod}`);
+      logger.info('program', `Stopping program ${this.name} (screen: ${this.screenName}) using method: ${this.stopMethod}`);
       
       // Check if we have a PID for signal methods
       if (this.stopMethod !== 'CTRL_C' && !this.pid) {
-        console.log(`No PID found for ${this.name}, trying to find it`);
+        logger.info('program', `No PID found for ${this.name}, trying to find it`);
         await this.findProcessPid();
         
         if (!this.pid) {
-          console.log(`Still no PID found for ${this.name}, cannot stop with signal`);
+          logger.info('program', `Still no PID found for ${this.name}, cannot stop with signal`);
           
           // If we can't find PID but screen is active, try Ctrl+C as fallback
           if (this.screenActive) {
@@ -179,10 +180,10 @@ export class Program extends EventEmitter {
       
       // Use the configured stop method
       if (this.stopMethod === 'SIGINT') {
-        console.log(`Sending SIGINT to process ${this.pid}`);
+        logger.info('program', `Sending SIGINT to process ${this.pid}`);
         process.kill(this.pid!, 'SIGINT');
       } else if (this.stopMethod === 'SIGHUP') {
-        console.log(`Sending SIGHUP to process ${this.pid}`);
+        logger.info('program', `Sending SIGHUP to process ${this.pid}`);
         process.kill(this.pid!, 'SIGHUP');
       } else if (this.stopMethod === 'CTRL_C') {
         return this.stopWithCtrlC();
@@ -195,34 +196,34 @@ export class Program extends EventEmitter {
       await this.findProcessPid();
       
       if (!this.pid) {
-        console.log(`Program ${this.name} stopped successfully`);
+        logger.info('program', `Program ${this.name} stopped successfully`);
         this.updateStatus('stopped');
         return true;
       } else {
-        console.log(`Program ${this.name} is still running after stop attempt`);
+        logger.info('program', `Program ${this.name} is still running after stop attempt`);
         return false;
       }
     } catch (error) {
-      console.error(`Error stopping program ${this.name}:`, error);
+      logger.error('program', `Error stopping program ${this.name}:`, error);
       return false;
     }
   }
   
   private async stopWithCtrlC(): Promise<boolean> {
-    console.log(`Stopping ${this.name} by sending Ctrl+C to screen ${this.screenName}`);
+    logger.info('program', `Stopping ${this.name} by sending Ctrl+C to screen ${this.screenName}`);
     
     // Check if screen is active
     if (!this.screenActive) {
       await this.checkScreenActive();
       if (!this.screenActive) {
-        console.log(`Screen ${this.screenName} is not active, cannot send Ctrl+C`);
+        logger.info('program', `Screen ${this.screenName} is not active, cannot send Ctrl+C`);
         return false;
       }
     }
     
     // Send Ctrl+C to the screen session
     const ctrlCSent = await this.sendCommandToScreen('\x03');
-    console.log(`Sent Ctrl+C to screen ${this.screenName}: ${ctrlCSent ? 'success' : 'failed'}`);
+    logger.info('program', `Sent Ctrl+C to screen ${this.screenName}: ${ctrlCSent ? 'success' : 'failed'}`);
     
     // Wait a moment for the process to terminate
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -231,31 +232,31 @@ export class Program extends EventEmitter {
     await this.findProcessPid();
     
     if (!this.pid) {
-      console.log(`Program ${this.name} stopped successfully with Ctrl+C`);
+      logger.info('program', `Program ${this.name} stopped successfully with Ctrl+C`);
       this.updateStatus('stopped');
       return true;
     } else {
-      console.log(`Program ${this.name} is still running after Ctrl+C`);
+      logger.info('program', `Program ${this.name} is still running after Ctrl+C`);
       return false;
     }
   }
   
   async terminate(): Promise<boolean> {
     try {
-      console.log(`Terminating program ${this.name} (screen: ${this.screenName})`);
+      logger.info('program', `Terminating program ${this.name} (screen: ${this.screenName})`);
       
       // First check if screen is active
       await this.checkScreenActive();
       
       // If screen is active, kill it regardless of process state
       if (this.screenActive) {
-        console.log(`Killing screen session ${this.screenName}`);
+        logger.info('program', `Killing screen session ${this.screenName}`);
         await new Promise<void>((resolve) => {
           exec(`screen -S ${this.screenName} -X quit`, (error) => {
             if (error) {
-              console.error(`Failed to kill screen ${this.screenName}:`, error);
+              logger.error('program', `Failed to kill screen ${this.screenName}:`, error);
             } else {
-              console.log(`Screen session ${this.screenName} killed successfully`);
+              logger.info('program', `Screen session ${this.screenName} killed successfully`);
             }
             resolve();
           });
@@ -264,20 +265,20 @@ export class Program extends EventEmitter {
       
       // Then try to kill the process if we have a PID
       if (this.pid) {
-        console.log(`Killing process tree for PID ${this.pid}`);
+        logger.info('program', `Killing process tree for PID ${this.pid}`);
         try {
           await new Promise<void>((resolve, reject) => {
             treeKill(this.pid!, 'SIGKILL', (err: any) => {
               if (err) {
-                console.error(`Error killing process tree for ${this.name}:`, err);
+                logger.error('program', `Error killing process tree for ${this.name}:`, err);
               } else {
-                console.log(`Process tree for ${this.name} killed successfully`);
+                logger.info('program', `Process tree for ${this.name} killed successfully`);
               }
               resolve();
             });
           });
         } catch (error) {
-          console.error(`Error in treeKill for ${this.name}:`, error);
+          logger.error('program', `Error in treeKill for ${this.name}:`, error);
         }
       }
       
@@ -291,13 +292,13 @@ export class Program extends EventEmitter {
       
       // If screen still exists somehow, try one more aggressive approach
       if (screenStillExists) {
-        console.log(`Screen session ${this.screenName} still exists after quit command, trying force kill`);
+        logger.info('program', `Screen session ${this.screenName} still exists after quit command, trying force kill`);
         await new Promise<void>((resolve) => {
           exec(`screen -wipe ${this.screenName} && screen -S ${this.screenName} -X quit`, (error) => {
             if (error) {
-              console.error(`Failed to force kill screen ${this.screenName}:`, error);
+              logger.error('program', `Failed to force kill screen ${this.screenName}:`, error);
             } else {
-              console.log(`Screen session ${this.screenName} force killed successfully`);
+              logger.info('program', `Screen session ${this.screenName} force killed successfully`);
             }
             resolve();
           });
@@ -309,7 +310,7 @@ export class Program extends EventEmitter {
       
       return !this.screenActive;
     } catch (error) {
-      console.error(`Error terminating program ${this.name}:`, error);
+      logger.error('program', `Error terminating program ${this.name}:`, error);
       return false;
     }
   }
@@ -373,7 +374,7 @@ export class Program extends EventEmitter {
     
     // If screen was active before but now isn't, log it and update status
     if (prevScreenActive && !this.screenActive) {
-      console.log(`Screen session ${this.screenName} for program ${this.name} is no longer active`);
+      logger.info('program', `Screen session ${this.screenName} for program ${this.name} is no longer active`);
       this.pid = undefined;
       this.updateStatus('stopped');
       return;
@@ -382,7 +383,7 @@ export class Program extends EventEmitter {
     // If screen is not active, program cannot be running
     if (!this.screenActive) {
       if (this.status !== 'stopped') {
-        console.log(`Program ${this.name} is marked as stopped because screen ${this.screenName} is not active`);
+        logger.info('program', `Program ${this.name} is marked as stopped because screen ${this.screenName} is not active`);
         this.pid = undefined;
         this.updateStatus('stopped');
       }
@@ -394,7 +395,7 @@ export class Program extends EventEmitter {
     
     // If we lost the PID or the status changed to stopped, log it
     if ((prevPid && !this.pid) || (prevStatus === 'running' && this.status === 'stopped')) {
-      console.log(`Program ${this.name} is no longer running (was PID: ${prevPid})`);
+      logger.info('program', `Program ${this.name} is no longer running (was PID: ${prevPid})`);
     }
     
     // If we have a PID, double-check it's still valid
@@ -404,7 +405,7 @@ export class Program extends EventEmitter {
         process.kill(this.pid, 0);
         this.updateStatus('running');
       } catch (error) {
-        console.log(`Process ${this.pid} for ${this.name} is no longer running`);
+        logger.info('program', `Process ${this.pid} for ${this.name} is no longer running`);
         this.pid = undefined;
         this.updateStatus('stopped');
         
@@ -425,7 +426,7 @@ export class Program extends EventEmitter {
         this.screenActive = !error && stdout.includes(this.screenName);
         
         if (wasActive !== this.screenActive) {
-          console.log(`Screen session ${this.screenName} active status changed: ${wasActive} -> ${this.screenActive}`);
+          logger.info('program', `Screen session ${this.screenName} active status changed: ${wasActive} -> ${this.screenActive}`);
         }
         
         resolve(this.screenActive);
@@ -457,7 +458,7 @@ export class ProgramManager {
   
   constructor(configPath: string) {
     this.configPath = path.resolve(configPath);
-    console.log(this.configPath);
+    logger.info('program', this.configPath);
 
     this.ensureConfigDir();
   }
@@ -479,25 +480,25 @@ export class ProgramManager {
   
   async loadPrograms(): Promise<void> {
     try {
-      console.log(`Loading programs from config: ${this.configPath}`);
+      logger.info('program', `Loading programs from config: ${this.configPath}`);
       
       if (!fs.existsSync(this.configPath)) {
         // If config doesn't exist yet, create an empty one
-        console.log(`Config file doesn't exist, creating empty config at: ${this.configPath}`);
+        logger.info('program', `Config file doesn't exist, creating empty config at: ${this.configPath}`);
         await this.savePrograms();
         return;
       }
       
       const data = await fs.promises.readFile(this.configPath, 'utf-8');
-      console.log(`Read config data: ${data}`);
+      logger.info('program', `Read config data: ${data}`);
       
       try {
         const configs: ProgramConfig[] = JSON.parse(data);
-        console.log(`Parsed ${configs.length} program configs`);
+        logger.info('program', `Parsed ${configs.length} program configs`);
         
         this.programs.clear();
         for (const config of configs) {
-          console.log(`Creating program from config: ${JSON.stringify(config)}`);
+          logger.info('program', `Creating program from config: ${JSON.stringify(config)}`);
           const program = new Program(config, this.configPath);
           if (this.statusChangeCallback) {
             program.setStatusChangeCallback(this.statusChangeCallback);
@@ -505,13 +506,13 @@ export class ProgramManager {
           this.programs.set(program.id, program);
         }
         
-        console.log(`Loaded ${this.programs.size} programs from config`);
+        logger.info('program', `Loaded ${this.programs.size} programs from config`);
       } catch (parseError) {
-        console.error('Error parsing config JSON:', parseError);
+        logger.error('program', 'Error parsing config JSON:', parseError);
         throw parseError;
       }
     } catch (error) {
-      console.error('Error loading programs:', error);
+      logger.error('program', 'Error loading programs:', error);
     }
   }
   
@@ -519,9 +520,9 @@ export class ProgramManager {
     try {
       const configs = Array.from(this.programs.values()).map(p => p.toJSON());
       await fs.promises.writeFile(this.configPath, JSON.stringify(configs, null, 2));
-      console.log(`Saved ${configs.length} programs to config`);
+      logger.info('program', `Saved ${configs.length} programs to config`);
     } catch (error) {
-      console.error('Error saving programs:', error);
+      logger.error('program', 'Error saving programs:', error);
     }
   }
   
@@ -531,7 +532,7 @@ export class ProgramManager {
   
   getProgramStates(): ProgramState[] {
     const states = this.getPrograms().map(p => p.getState());
-    // console.log(`Getting program states, found ${states.length} programs:`, states);
+    // logger.info('program', `Getting program states, found ${states.length} programs:`, states);
     return states;
   }
   

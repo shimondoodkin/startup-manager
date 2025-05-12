@@ -1,6 +1,7 @@
 import { Socket, Namespace } from 'socket.io';
 import * as pty from 'node-pty';
 import { WebSocketServer } from './WebSocketServer';
+import logger, { logWithIP } from './logger';
 
 interface TerminalInstance {
   id: number;
@@ -35,7 +36,7 @@ export class TerminalServer {
 
   constructor() {
 
-    console.log('TerminalServer initialized');
+    logger.info('TerminalServer initialized');
 
     // Periodically check program name for all open PTYs every 3 seconds
     setInterval(() => {
@@ -57,18 +58,33 @@ export class TerminalServer {
 
   // Helper to get foreground process name for a PTY using ps
   private async getForegroundProcessName(pid: number): Promise<string | null> {
-    const { exec } = require('child_process');
-    return new Promise((resolve) => {
-      exec(`ps -o comm= --sid ${pid} | head -n 1`, (err: any, stdout: string) => {
-        if (err || !stdout) return resolve(null);
-        resolve(stdout.trim());
+    try {
+      // Validate pid is a positive integer for security
+      if (!Number.isInteger(pid) || pid <= 0) {
+        logger.warn('Invalid PID requested', { pid });
+        return null;
+      }
+      
+      // Use child_process.exec with proper string escaping to prevent command injection
+      const { exec } = require('child_process');
+      return new Promise((resolve) => {
+        exec(`ps -o comm= --sid ${pid} | head -n 1`, (err: any, stdout: string) => {
+          if (err || !stdout) {
+            if (process.env.NODE_ENV !== 'production') logger.debug('Error or empty output from ps command', { pid, error: err?.message });
+            return resolve(null);
+          }
+          resolve(stdout.trim());
+        });
       });
-    });
+    } catch (error) {
+      logger.error('Error getting foreground process name', { pid, error });
+      return null;
+    }
   }
 
   public setupSocketHandlers(socket: Socket) {
 
-    console.log(`Terminal client connected: ${socket.id}`);
+    logger.info(`Terminal client connected: ${socket.id}`);
 
     // let attachedTerminals: { [id: string]: TerminalInstance } = {};
 
@@ -184,14 +200,40 @@ export class TerminalServer {
   public createTerminal({ shell, titleNote }: { shell?: string, titleNote?: string }): TerminalSessionInfo {
     const terminalId = this.nextTerminalId++;
     let command: string[];
+    
+    // Validate and sanitize inputs
     if (shell) {
+      // Security check for dangerous commands
+      if (typeof shell !== 'string') {
+        logger.warn('Invalid shell command type', { type: typeof shell });
+        throw new Error('Invalid shell command type');
+      }
+      
+      // Block potentially dangerous commands
+      const dangerousPatterns = [
+        'rm -rf /', 'rm -rf /*', 'mkfs', 'dd if=/dev/zero', 
+        ';rm -rf', '|rm -rf', '&&rm -rf', '||rm -rf'
+      ];
+      
+      if (dangerousPatterns.some(pattern => shell.includes(pattern))) {
+        logger.warn('Potentially dangerous command blocked', { shell });
+        throw new Error('Command contains potentially dangerous operations and was blocked');
+      }
+      
       // Parse shell command string into command and args using node's built-in shell-quote
       const shellQuote = require('shell-quote');
-      // command = shellQuote.parse(shell, process.env);
       command = shellQuote.parse(shell); // env={}
+      
+      if (command.length === 0 || typeof command[0] !== 'string') {
+        logger.warn('Invalid shell command after parsing', { shell, parsed: command });
+        command = ['bash']; // Default to bash if parsing fails
+      }
     } else {
       command = ['bash'];
     }
+    
+    // Log terminal creation
+    logger.info('Creating new terminal', { terminalId, command: command[0] });
     const ptyProcess = pty.spawn(command[0], command.slice(1), {
       name: 'xterm-color',
       cols: 80,
@@ -269,7 +311,7 @@ export class TerminalServer {
           try {
             socket.emit('output', { id: terminal.id, data });
           } catch (error) {
-            console.error(`Error sending output to client ${socket.id}:`, error);
+            logger.error(`Error sending output to client ${socket.id}:`, error);
           }
         }
       });
@@ -304,6 +346,7 @@ export class TerminalServer {
   // }
 
   public async closeTerminal(terminalId: number) {
+    logger.info(`Closing terminal`, { terminalId });
     const terminal = this.terminals.find(t => t.id === terminalId);
     if (!terminal) {
       throw new Error("Terminal not found");

@@ -1,9 +1,10 @@
-import { Server, Namespace } from 'socket.io';
+import { Server, Namespace, Socket } from 'socket.io';
 import { Program, ProgramManager, ProgramState } from './Program';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { TerminalServer } from './TerminalServer';
+import logger, { logWithIP } from './logger';
 
 // Define the RPC message types
 export interface RPCRequest {
@@ -32,6 +33,9 @@ export class WebSocketServer {
     password: process.env.ADMIN_PASSWORD || 'password'
   };
   
+  // Track connection attempts for rate limiting
+  private connectionAttempts: Record<string, {count: number, lastAttempt: number}> = {};
+  
   constructor(namespace: Namespace) {
     this.io = namespace;
     
@@ -50,23 +54,53 @@ export class WebSocketServer {
   
   private setupSocketHandlers() {
     this.io.use((socket, next) => {
-      const { username, password } = socket.handshake.auth;
-      
-      if (!username || !password || 
-          username !== this.authCredentials.username || 
-          password !== this.authCredentials.password) {
-        return next(new Error('Authentication failed'));
+      try {
+        // Get client IP address
+        const ip = this.getClientIP(socket);
+        
+        // Implement rate limiting for authentication attempts
+        if (!this.checkRateLimit(ip)) {
+          logWithIP('warn', 'Rate limit exceeded for authentication attempts', ip, {
+            socketId: socket.id
+          });
+          return next(new Error('Too many authentication attempts'));
+        }
+        
+        const { username, password } = socket.handshake.auth;
+        
+        if (!username || !password || 
+            username !== this.authCredentials.username || 
+            password !== this.authCredentials.password) {
+          logWithIP('warn', 'Authentication failed', ip, {
+            socketId: socket.id,
+            username
+          });
+          return next(new Error('Authentication failed'));
+        }
+        
+        // Log successful authentication
+        logWithIP('info', 'Authentication successful', ip, {
+          socketId: socket.id,
+          username
+        });
+        
+        next();
+      } catch (error) {
+        logger.error('Error in socket middleware', { error });
+        next(new Error('Server error'));
       }
-      
-      next();
     });
     
     this.io.on('connection', (socket) => {
-      console.log(`Client connected: ${socket.id}`);
+      const ip = this.getClientIP(socket);
+      logWithIP('info', 'Client connected', ip, { socketId: socket.id });
       
       // Send initial program list to the client upon successful connection
       const programStates = this.programManager.getProgramStates();
-      console.log(`Sending initial program list to client ${socket.id}:`, programStates);
+      if (process.env.NODE_ENV !== 'production') logWithIP('debug', 'Sending initial program list to client', this.getClientIP(socket), {
+        socketId: socket.id,
+        programCount: programStates.length
+      });
       
       socket.emit('notification', {
         method: 'initialProgramList',
@@ -74,20 +108,41 @@ export class WebSocketServer {
       });
       
       socket.on('rpc', async (request: RPCRequest, callback) => {
+        const ip = this.getClientIP(socket);
         try {
-          console.log(`Received RPC request from ${socket.id}:`, request.method, request.params);
+          if (process.env.NODE_ENV !== 'production') logWithIP('debug', `Received RPC request`, ip, {
+            socketId: socket.id,
+            method: request.method,
+            requestId: request.id
+          });
+          
           const result = await this.handleRPC(request, socket.id);
-          console.log(`Sending RPC response to ${socket.id}:`, request.method, result);
+          
+          if (process.env.NODE_ENV !== 'production') logWithIP('debug', `Sending RPC response`, ip, {
+            socketId: socket.id,
+            method: request.method,
+            requestId: request.id,
+            success: true
+          });
+          
           callback({ id: request.id, result });
         } catch (error) {
-          console.error(`Error handling RPC ${request.method}:`, error);
-          callback({ id: request.id, error: error instanceof Error ? error.message : 'Unknown error' });
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          logWithIP('error', `Error handling RPC`, ip, {
+            socketId: socket.id,
+            method: request.method,
+            requestId: request.id,
+            error: errorMessage
+          });
+          
+          callback({ id: request.id, error: errorMessage });
         }
       });
 
       const onDisconnect: ()=>void = this.terminalServer?.setupSocketHandlers(socket) || (() => {});
       socket.on('disconnect', () => {
-        console.log(`Client disconnected: ${socket.id}`);
+        const ip = this.getClientIP(socket);
+        logWithIP('info', 'Client disconnected', ip, { socketId: socket.id });
         onDisconnect();
       });
 
@@ -182,7 +237,7 @@ export class WebSocketServer {
           throw new Error('Terminal server not initialized');
         }
         // Close the specified terminal
-        console.log(`RPC: Closing terminal ${params.id}`);
+        logger.info(`Closing terminal`, { terminalId: params.id });
         this.terminalServer.closeTerminal(params.id);
         return { success: true };
         
@@ -204,14 +259,69 @@ export class WebSocketServer {
     this.io.emit('notification', notification);
   }
   
-  async initialize() {
+  public async initialize() {
     await this.programManager.loadPrograms();
     await this.programManager.startAllAutoStart();
+    return;
   }
   
   // Set the terminal server instance for terminal-related operations
-  setTerminalServer(terminalServer: TerminalServer) {
+  public setTerminalServer(terminalServer: TerminalServer) {
     this.terminalServer = terminalServer;
+  }
+  
+  // Utility method to get client IP address
+  private getClientIP(socket: Socket): string {
+    // Try to get IP from headers if behind proxy
+    const forwardedFor = socket.handshake.headers['x-forwarded-for'];
+    if (forwardedFor) {
+      return Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor.split(',')[0];
+    }
+    
+    // Fall back to socket remote address
+    return socket.handshake.address || 'unknown';
+  }
+  
+  // Rate limiting for authentication attempts
+  private checkRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000; // 15 minutes
+    const maxAttempts = 5; // Max attempts per window
+    
+    // Initialize tracking for this IP if not exists
+    if (!this.connectionAttempts[ip]) {
+      this.connectionAttempts[ip] = { count: 1, lastAttempt: now };
+      return true;
+    }
+    
+    const attempt = this.connectionAttempts[ip];
+    
+    // Reset counter if outside window
+    if (now - attempt.lastAttempt > windowMs) {
+      attempt.count = 1;
+      attempt.lastAttempt = now;
+      return true;
+    }
+    
+    // Increment counter and check limit
+    attempt.count++;
+    attempt.lastAttempt = now;
+    
+    // Clean up old entries periodically
+    if (Object.keys(this.connectionAttempts).length > 1000) {
+      this.cleanupConnectionAttempts(now - windowMs);
+    }
+    
+    return attempt.count <= maxAttempts;
+  }
+  
+  // Clean up old rate limiting entries
+  private cleanupConnectionAttempts(olderThan: number) {
+    for (const ip in this.connectionAttempts) {
+      if (this.connectionAttempts[ip].lastAttempt < olderThan) {
+        delete this.connectionAttempts[ip];
+      }
+    }
   }
   
   private startMonitoring() {
@@ -232,7 +342,7 @@ export class WebSocketServer {
     }, 3000);
   }
   
-  shutdown() {
+  public shutdown() {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
@@ -240,6 +350,8 @@ export class WebSocketServer {
     
     // Disconnect all sockets in this namespace
     this.io.disconnectSockets(true);
+    
+    logger.info('WebSocket server shutdown complete');
   }
   
 }
