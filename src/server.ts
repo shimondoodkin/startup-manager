@@ -48,14 +48,8 @@ async function start() {
     },
   }));
 
-  // Apply rate limiting
-  expressApp.use(rateLimit({
-    windowMs: Math.round(config.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000),
-    max: config.RATE_LIMIT_MAX_REQUESTS,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: 'Too many requests, please try again later',
-  }));
+  // We're only applying rate limiting to WebSocket login attempts
+  // See WebSocketServer.ts for implementation
 
   // Ensure logs directory exists
   if (!fs.existsSync(config.LOG_DIR)) {

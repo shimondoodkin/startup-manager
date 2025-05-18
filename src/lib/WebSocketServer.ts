@@ -5,6 +5,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { TerminalServer } from './TerminalServer';
 import logger, { logWithIP } from './logger';
+import config from './config';
 
 // Define the RPC message types
 export interface RPCRequest {
@@ -282,11 +283,12 @@ export class WebSocketServer {
     return socket.handshake.address || 'unknown';
   }
   
-  // Rate limiting for authentication attempts
+  // Rate limiting for authentication attempts (WebSocket logins only)
   private checkRateLimit(ip: string): boolean {
     const now = Date.now();
-    const windowMs = 15 * 60 * 1000; // 15 minutes
-    const maxAttempts = 5; // Max attempts per window
+    // Use configuration values for rate limiting
+    const windowMs = config.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000;
+    const maxAttempts = config.RATE_LIMIT_MAX_REQUESTS;
     
     // Initialize tracking for this IP if not exists
     if (!this.connectionAttempts[ip]) {
