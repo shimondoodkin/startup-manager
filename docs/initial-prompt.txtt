@@ -1,0 +1,29 @@
+In next.js and a websocket server, typescript,  Build program for running programs a start up manager with api and ui. Kind of a running services manager. To start the all programs that were running again on startup. Allow to start program in the list, allow to sigint a program. Kill a program. It has an CRUD API to allow editing and adding  programs. When adding a program there will be a large text box for the command and the arguments, there will be a common name text box. 
+
+It would have a hardcoded login user and password. the websocket would require it to be authenticated, all api is through websocket.
+
+
+It will have API. And a UI.
+There will be a main UI component it will construct an API URL based on the current address. It will add /api/programs
+And it will put a component that will receive this API address and will show a management screen for that server. The idea is to allow to embed this component in different server later and provide it with API endpoint.
+
+
+The UI component will have Tabs UI at top. In the first tab will the main editing component, in the next tabs there will be terminals those tabs can be closed,
+
+The main editing component  will have two screens, an editing screen to add or edit a program while adding or editing a program, and a list of programs, a button to add a program.
+
+The list of program updates the statuses of the programs.
+
+In the list of program for each program. It will be a status if it is running or not, also there will be buttons to  edit, Start shell, run , stop, kill program and shell, and a terminal button, if you could integrate the web terminal it would be very good, when user will press on the terminal button it would start with a command to connect a running linux screen. 
+
+That will be an option to start a program in a linux screen.
+It will start screen with bash and a name.
+Then send command to screen to run the program, a delete button with confirmation.
+  there will be a function to detect running program PID it will see from lunched PID children of those process ids and we'll pick up maybe the second or the third to get the real pID of the running application and not of the shell. It is useful after the start of the program to save at what depth child level the actual pid is the quickly check if the program is running or not even before launching the program for the next time. 
+
+Maybe by comparing the command if it is possible to retrieve it. It will monitor the process id of the actual program to check if it is not crushed. 
+It will be used To report status correctly if the program is running. It could be that the shed still running so you have kind of a PID of the shell that it is running. But the program would be crashed and not running.
+
+
+this programs manager is working it will have a list of instances of classes of each program that it is responsible of it. 
+The class would have a configuration, a function to save itself and a function to load itself from a file. The configuration for each program would be saved in a json file in a configuration folder.
