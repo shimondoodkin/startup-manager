@@ -15,7 +15,7 @@ import morgan from 'morgan';
 import config from './lib/config';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = 'startup-manager.server8.doodkin.com';
 let port = parseInt(process.env.PORT || '3000', 10);
 
 
@@ -47,6 +47,9 @@ async function start() {
       },
     },
   }));
+
+  // Serve Next.js build assets
+  expressApp.use('/_next/static', express.static(join(__dirname, '..', '.next', 'static')));
 
   // We're only applying rate limiting to WebSocket login attempts
   // See WebSocketServer.ts for implementation
@@ -84,8 +87,13 @@ async function start() {
 
       // Security: Apply express middleware (helmet, rate limiting, etc)
       await new Promise<void>((resolve) => {
-        expressApp(req, res); //, resolve
+        expressApp(req as any, res as any, resolve as any);
       });
+
+      // If middleware already ended the response (e.g., static asset), stop here.
+      if (res.writableEnded || res.headersSent) {
+        return;
+      }
 
       // Parse URL
       const parsedUrl = parse(req.url!, true);
