@@ -241,13 +241,13 @@ export const ProgramForm: React.FC<ProgramFormProps> = ({ program, onCancel, onS
 
       {/* Delete confirmation modal */}
       {confirmDelete && (
-        <div className="fixed inset-0 overflow-y-auto" onClick={() => setConfirmDelete(false)}>
+        <div className="fixed inset-0 z-50 overflow-y-auto" onClick={() => setConfirmDelete(false)}>
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             <div className="fixed inset-0 transition-opacity" aria-hidden="true">
               <div className="absolute inset-0 opacity-75" style={{ background: 'rgba(0, 0, 0, 0.5)' }}></div>
             </div>
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div className="inline-block align-bottom rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full" style={{ background: 'var(--card-bg)' }}>
+            <div className="relative z-10 inline-block align-bottom rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full" style={{ background: 'var(--card-bg)' }} onClick={(e) => e.stopPropagation()}>
               <div className="px-4 pt-5 pb-4 sm:p-6 sm:pb-4" style={{ background: 'var(--card-bg)' }}>
                 <div className="sm:flex sm:items-start">
                   <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">

@@ -99,10 +99,11 @@ export class TerminalManagerClass {
       if (screenName) {
         console.log(`Creating new terminal: screenName=${screenName}`);
         // Request a new terminal from the server
-        response = await this.client.callRPC('createTerminal', { shell: `screen -x ${screenName}`, titleNote: screenName });
+        response = await this.client.callRPC('createTerminal', { attachSession: screenName, titleNote: screenName });
       } else {
         console.log('Creating new terminal');
-        response = await this.client.callRPC('createTerminal', { shell: 'bash' });
+        // No shell given: the server picks the platform default (bash, or powershell.exe on Windows)
+        response = await this.client.callRPC('createTerminal', {});
       }
 
       // We need to get the full terminal info using the ID
@@ -163,7 +164,10 @@ export class TerminalManagerClass {
       id: `terminal-${instance.id}`,
       type: 'terminal',
       title: `Terminal ${instance.id}${instance.titleNote ? '[' + instance.titleNote + ']' : ''}${instance.programName ? ': ' + instance.programName : ''}`,
-      closable: false,
+      // Only program terminals (attached to a tmux session) get a close button:
+      // closing kills just the attach pty, the program keeps running. A user shell
+      // has no X because closing it would kill the shell - use Terminate explicitly.
+      closable: !!instance.titleNote,
       terminalInstance: instance,
       active: active,
     });
@@ -492,6 +496,12 @@ export class TerminalManagerClass {
     socket.on('size', (size: { cols: number, rows: number }) => {
       term.resize(size.cols, size.rows)
     });
+
+    // Keep the server-side pty the same size as the browser terminal (fit addon
+    // resizes xterm on open / window resize; xterm fires onResize for each change).
+    const sendSize = () => socket.emit('resize', { id: instance.id, cols: term.cols, rows: term.rows });
+    term.onResize(sendSize);
+    socket.on('connected', sendSize);
 
     socket.on('refresh', (payload: { id: number, data: string }) => {
       if (payload.id === instance.id) {

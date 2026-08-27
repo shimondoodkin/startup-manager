@@ -132,10 +132,30 @@ async function start() {
     },
     // Add CORS protection in production
     cors: process.env.NODE_ENV === 'production' ? {
-      origin: process.env.ALLOWED_ORIGINS?.split(',') || [process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'],
+      origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+        process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:${port}`,
+        `http://127.0.0.1:${port}`,
+      ],
       methods: ['GET', 'POST']
     } : {}
   });
+
+  // SINGLETON GUARD: bind the port BEFORE loading programs and running autostart.
+  // A second server instance must die HERE — 2026-08-24 incident: duplicate servers
+  // ran startAllAutoStart with their own program snapshot before the (swallowed)
+  // EADDRINUSE surfaced, spawning 9 duplicate paper traders each time.
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, resolve);
+    });
+  } catch (err) {
+    logger.error('Port bind failed — another startup-manager instance is likely running; exiting WITHOUT autostart', { port, error: err instanceof Error ? err.message : String(err) });
+    process.exit(1);
+  }
+  const address = server.address() as AddressInfo;
+  port = address.port; // Update the port variable with the actual port used
+  logger.info(`Server started`, { port, hostname, env: process.env.NODE_ENV });
 
   // Create namespaces for different services
   const programsNamespace = io.of('/');
@@ -150,12 +170,6 @@ async function start() {
   // Connect the terminal server to the websocket server
   wsServer.setTerminalServer(terminalServer);
   terminalServer.setWebSocketServer(wsServer);
-
-  // Try to listen on the current port
-  await new Promise<void>((resolve) => { server.listen(port, resolve); });
-  const address = server.address() as AddressInfo;
-  port = address.port; // Update the port variable with the actual port used
-  logger.info(`Server started`, { port, hostname, env: process.env.NODE_ENV });
 
   process.on('uncaughtException', (err) => {
     logger.error('Uncaught exception:', { error: err.message, stack: err.stack });

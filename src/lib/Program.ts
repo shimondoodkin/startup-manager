@@ -1,13 +1,28 @@
-import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { Tmux, getTmux } from './tmux';
 import logger from './logger';
+
+/** Program-category logger: `log.info(msg, extra?)` -> logger with category metadata. */
+const log = {
+  info: (msg: string, extra?: unknown) => logger.info(msg, { category: 'program', ...(extra !== undefined ? { extra: String(extra) } : {}) }),
+  warn: (msg: string, extra?: unknown) => logger.warn(msg, { category: 'program', ...(extra !== undefined ? { extra: String(extra) } : {}) }),
+  error: (msg: string, extra?: unknown) => logger.error(msg, { category: 'program', ...(extra !== undefined ? { extra: extra instanceof Error ? extra.stack || extra.message : String(extra) } : {}) }),
+  debug: (msg: string, extra?: unknown) => logger.debug(msg, { category: 'program', ...(extra !== undefined ? { extra: String(extra) } : {}) }),
+};
 import treeKill from 'tree-kill';
 import { EventEmitter } from 'events';
 
 export type StopMethod = 'SIGINT' | 'SIGHUP' | 'CTRL_C';
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Shell names that mean "nothing is running in the session right now". */
+const IDLE_SHELLS = new Set(['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'tcsh', 'csh', 'bash.exe', 'sh.exe']);
+export function isIdleShell(command: string): boolean {
+  return IDLE_SHELLS.has(command.trim().toLowerCase());
+}
 
 export interface ProgramConfig {
   id: string;
@@ -25,6 +40,7 @@ export interface ProgramState extends ProgramConfig {
   pid?: number;
   status: ProgramStatus;
   screenActive: boolean;
+  foregroundCommand?: string;
 }
 
 export class Program extends EventEmitter {
@@ -38,6 +54,7 @@ export class Program extends EventEmitter {
   private pid?: number;
   private status: ProgramStatus = 'stopped';
   private screenActive: boolean = false;
+  private foregroundCommand?: string;
   private statusChangeCallback: ((program: ProgramState) => void) | null = null;
   private configPath: string;
   
@@ -64,7 +81,8 @@ export class Program extends EventEmitter {
       stopMethod: this.stopMethod,
       pid: this.pid,
       status: this.status,
-      screenActive: this.screenActive
+      screenActive: this.screenActive,
+      foregroundCommand: this.status === 'running' ? this.foregroundCommand : undefined
     };
   }
   
@@ -85,355 +103,221 @@ export class Program extends EventEmitter {
     }
   }
   
+  // ---------------------------------------------------------------------
+  // tmux-backed session management (cross-platform: Linux, macOS, Windows
+  // via Cygwin/MSYS tmux). "screen" in the public API/UI is kept for
+  // backwards compatibility; a "screen" is a tmux session.
+  // ---------------------------------------------------------------------
+
+  private get tmux(): Tmux {
+    return getTmux();
+  }
+
   async startScreen(): Promise<boolean> {
-    return new Promise((resolve) => {
-      // First check if screen is already active
-      exec(`screen -list | grep "${this.screenName}"`, async (error, stdout) => {
-        if (!error && stdout.includes(this.screenName)) {
-          // Screen already exists, mark as active and resolve
-          logger.info('program', `Screen ${this.screenName} already exists, using existing session`);
-          this.screenActive = true;
-          resolve(true);
-          return;
-        }
-        
-        // Screen doesn't exist, create a new one
-        exec(`screen -dmS ${this.screenName}`, async (error) => {
-          if (error) {
-            logger.error('program', `Failed to start screen for ${this.name}:`, error);
-            resolve(false);
-            return;
-          }
-          
-          await this.checkScreenActive();
-          resolve(this.screenActive);
-        });
-      });
-    });
+    try {
+      if (await this.tmux.hasSession(this.screenName)) {
+        log.info(`Session ${this.screenName} already exists, using existing session`);
+        this.setScreenActive(true);
+        return true;
+      }
+      const created = await this.tmux.newSession(this.screenName);
+      if (!created) {
+        log.error(`Failed to start tmux session for ${this.name}`);
+      }
+      await this.checkScreenActive();
+      return this.screenActive;
+    } catch (error) {
+      log.error(`Error starting session for ${this.name}:`, error);
+      return false;
+    }
   }
-  
+
+  /** Type a command line into the session and press Enter. */
   async sendCommandToScreen(command: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      exec(`screen -S ${this.screenName} -X stuff "${command}\n"`, (error) => {
-        if (error) {
-          logger.error('program', `Failed to send command to screen ${this.screenName}:`, error);
-          resolve(false);
-          return;
-        }
-        resolve(true);
-      });
-    });
+    const ok = await this.tmux.sendKeys(this.screenName, command, true);
+    if (!ok) log.error(`Failed to send command to session ${this.screenName}`);
+    return ok;
   }
-  
+
+  /** Raw scrollback + visible screen of the session (undefined if no session). */
+  async getOutput(lines = 1000): Promise<string | undefined> {
+    return this.tmux.capturePane(this.screenName, lines);
+  }
+
   async runInScreen(): Promise<boolean> {
     const screenStarted = await this.startScreen();
     if (!screenStarted) return false;
-    
     return this.sendCommandToScreen(this.command);
   }
-  
+
   async start(): Promise<boolean> {
     try {
-      // First check if screen already exists and has our process running
       const existingPid = await this.findProcessPid();
       if (existingPid) {
-        logger.info('program', `Program ${this.name} is already running with PID ${existingPid}`);
+        log.info(`Program ${this.name} is already running with PID ${existingPid}`);
         this.updateStatus('running');
         return true;
       }
-      
-      // Start the program in a screen
+
       if (await this.runInScreen()) {
-        // We need to get the PID of the actual process running in the screen
+        // Give the shell a moment to launch the program before probing.
+        await delay(500);
         await this.findProcessPid();
         this.updateStatus('running');
         return true;
       }
       return false;
     } catch (error) {
-      logger.error('program', `Error starting program ${this.name}:`, error);
+      log.error(`Error starting program ${this.name}:`, error);
       this.updateStatus('error');
       return false;
     }
   }
-  
+
   async stop(): Promise<boolean> {
     try {
-      logger.info('program', `Stopping program ${this.name} (screen: ${this.screenName}) using method: ${this.stopMethod}`);
-      
-      // Check if we have a PID for signal methods
-      if (this.stopMethod !== 'CTRL_C' && !this.pid) {
-        logger.info('program', `No PID found for ${this.name}, trying to find it`);
-        await this.findProcessPid();
-        
-        if (!this.pid) {
-          logger.info('program', `Still no PID found for ${this.name}, cannot stop with signal`);
-          
-          // If we can't find PID but screen is active, try Ctrl+C as fallback
-          if (this.screenActive) {
-            return this.stopWithCtrlC();
-          }
-          
-          return false;
-        }
-      }
-      
-      // Use the configured stop method
-      if (this.stopMethod === 'SIGINT') {
-        logger.info('program', `Sending SIGINT to process ${this.pid}`);
-        process.kill(this.pid!, 'SIGINT');
-      } else if (this.stopMethod === 'SIGHUP') {
-        logger.info('program', `Sending SIGHUP to process ${this.pid}`);
-        process.kill(this.pid!, 'SIGHUP');
-      } else if (this.stopMethod === 'CTRL_C') {
+      log.info(`Stopping program ${this.name} (session: ${this.screenName}) using method: ${this.stopMethod}`);
+
+      if (this.stopMethod === 'CTRL_C' || process.platform === 'win32') {
+        // POSIX signals can't be delivered to processes living inside a
+        // Cygwin pty from a native Node process, so on Windows every stop
+        // method degrades to Ctrl+C in the session.
         return this.stopWithCtrlC();
       }
-      
-      // Wait a moment for the process to terminate
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Check if the process is still running
-      await this.findProcessPid();
-      
+
       if (!this.pid) {
-        logger.info('program', `Program ${this.name} stopped successfully`);
+        await this.findProcessPid();
+        if (!this.pid) {
+          log.info(`No PID found for ${this.name}, cannot stop with signal`);
+          return this.screenActive ? this.stopWithCtrlC() : false;
+        }
+      }
+
+      log.info(`Sending ${this.stopMethod} to process ${this.pid}`);
+      process.kill(this.pid!, this.stopMethod);
+      return this.waitForStop('signal');
+    } catch (error) {
+      log.error(`Error stopping program ${this.name}:`, error);
+      return false;
+    }
+  }
+
+  private async stopWithCtrlC(): Promise<boolean> {
+    log.info(`Stopping ${this.name} by sending Ctrl+C to session ${this.screenName}`);
+    if (!(await this.checkScreenActive())) {
+      log.info(`Session ${this.screenName} is not active, cannot send Ctrl+C`);
+      return false;
+    }
+    const sent = await this.tmux.sendCtrlC(this.screenName);
+    log.info(`Sent Ctrl+C to session ${this.screenName}: ${sent ? 'success' : 'failed'}`);
+    if (!sent) return false;
+    return this.waitForStop('Ctrl+C');
+  }
+
+  /** Poll for up to ~3s until the foreground program has exited. */
+  private async waitForStop(how: string): Promise<boolean> {
+    for (let i = 0; i < 6; i++) {
+      await delay(500);
+      await this.findProcessPid();
+      if (!this.pid) {
+        log.info(`Program ${this.name} stopped successfully (${how})`);
         this.updateStatus('stopped');
         return true;
-      } else {
-        logger.info('program', `Program ${this.name} is still running after stop attempt`);
-        return false;
-      }
-    } catch (error) {
-      logger.error('program', `Error stopping program ${this.name}:`, error);
-      return false;
-    }
-  }
-  
-  private async stopWithCtrlC(): Promise<boolean> {
-    logger.info('program', `Stopping ${this.name} by sending Ctrl+C to screen ${this.screenName}`);
-    
-    // Check if screen is active
-    if (!this.screenActive) {
-      await this.checkScreenActive();
-      if (!this.screenActive) {
-        logger.info('program', `Screen ${this.screenName} is not active, cannot send Ctrl+C`);
-        return false;
       }
     }
-    
-    // Send Ctrl+C to the screen session
-    const ctrlCSent = await this.sendCommandToScreen('\x03');
-    logger.info('program', `Sent Ctrl+C to screen ${this.screenName}: ${ctrlCSent ? 'success' : 'failed'}`);
-    
-    // Wait a moment for the process to terminate
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Check if the process is still running
-    await this.findProcessPid();
-    
-    if (!this.pid) {
-      logger.info('program', `Program ${this.name} stopped successfully with Ctrl+C`);
-      this.updateStatus('stopped');
-      return true;
-    } else {
-      logger.info('program', `Program ${this.name} is still running after Ctrl+C`);
-      return false;
-    }
+    log.info(`Program ${this.name} is still running after ${how}`);
+    return false;
   }
-  
+
+  /** Kill the whole tmux session (and everything in it). */
   async terminate(): Promise<boolean> {
     try {
-      logger.info('program', `Terminating program ${this.name} (screen: ${this.screenName})`);
-      
-      // First check if screen is active
-      await this.checkScreenActive();
-      
-      // If screen is active, kill it regardless of process state
-      if (this.screenActive) {
-        logger.info('program', `Killing screen session ${this.screenName}`);
+      log.info(`Terminating program ${this.name} (session: ${this.screenName})`);
+
+      if (await this.checkScreenActive()) {
+        const killed = await this.tmux.killSession(this.screenName);
+        log.info(`kill-session ${this.screenName}: ${killed ? 'ok' : 'failed'}`);
+      }
+
+      // Belt and braces: if we know the shell PID and it outlived the session, kill its tree.
+      if (this.pid && process.platform !== 'win32') {
         await new Promise<void>((resolve) => {
-          exec(`screen -S ${this.screenName} -X quit`, (error) => {
-            if (error) {
-              logger.error('program', `Failed to kill screen ${this.screenName}:`, error);
-            } else {
-              logger.info('program', `Screen session ${this.screenName} killed successfully`);
-            }
+          treeKill(this.pid!, 'SIGKILL', (err: any) => {
+            if (err) log.error(`Error killing process tree for ${this.name}:`, err);
             resolve();
           });
         });
       }
-      
-      // Then try to kill the process if we have a PID
-      if (this.pid) {
-        logger.info('program', `Killing process tree for PID ${this.pid}`);
-        try {
-          await new Promise<void>((resolve, reject) => {
-            treeKill(this.pid!, 'SIGKILL', (err: any) => {
-              if (err) {
-                logger.error('program', `Error killing process tree for ${this.name}:`, err);
-              } else {
-                logger.info('program', `Process tree for ${this.name} killed successfully`);
-              }
-              resolve();
-            });
-          });
-        } catch (error) {
-          logger.error('program', `Error in treeKill for ${this.name}:`, error);
-        }
-      }
-      
-      // Update status
+
       this.pid = undefined;
-      this.screenActive = false;
+      this.setScreenActive(false);
       this.updateStatus('stopped');
-      
-      // Verify the screen is gone
-      const screenStillExists = await this.checkScreenActive();
-      
-      // If screen still exists somehow, try one more aggressive approach
-      if (screenStillExists) {
-        logger.info('program', `Screen session ${this.screenName} still exists after quit command, trying force kill`);
-        await new Promise<void>((resolve) => {
-          exec(`screen -wipe ${this.screenName} && screen -S ${this.screenName} -X quit`, (error) => {
-            if (error) {
-              logger.error('program', `Failed to force kill screen ${this.screenName}:`, error);
-            } else {
-              logger.info('program', `Screen session ${this.screenName} force killed successfully`);
-            }
-            resolve();
-          });
-        });
-        
-        // Check one more time
-        this.screenActive = await this.checkScreenActive();
-      }
-      
+
+      await this.checkScreenActive();
       return !this.screenActive;
     } catch (error) {
-      logger.error('program', `Error terminating program ${this.name}:`, error);
+      log.error(`Error terminating program ${this.name}:`, error);
       return false;
     }
   }
-  
+
+  /**
+   * Determine whether a program (anything other than the session's idle
+   * shell) is running in the foreground of the session. Sets this.pid to the
+   * pane's shell PID while something is running, undefined otherwise.
+   */
   async findProcessPid(): Promise<number | undefined> {
-    return new Promise((resolve) => {
-      // First check if the screen is active
-      this.checkScreenActive().then(screenActive => {
-        if (!screenActive) {
-          this.pid = undefined;
-          this.updateStatus('stopped');
-          resolve(undefined);
-          return;
-        }
-        
-        // More robust approach to find processes in the screen session
-        // Get all processes running in the screen session
-        exec(`ps -o pid,cmd -t $(screen -ls | grep "${this.screenName}" | awk '{print $1}' | cut -d. -f1) | grep -v "SCREEN\\|ps\\|grep\\|awk\\|cut" | head -n 1 | awk '{print $1}'`, (err, stdout) => {
-          if (err || !stdout.trim()) {
-            // Try an alternative approach - find any process with our command
-            const escapedCommand = this.command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            exec(`ps aux | grep "${escapedCommand}" | grep -v "grep\\|screen -S\\|SCREEN" | awk '{print $2}' | head -n 1`, (err2, stdout2) => {
-              if (err2 || !stdout2.trim()) {
-                // One more attempt - check if there's any process in the screen
-                exec(`ps -o pid -t $(screen -ls | grep "${this.screenName}" | awk '{print $1}' | cut -d. -f1) | grep -v "PID" | head -n 1`, (err3, stdout3) => {
-                  if (err3 || !stdout3.trim()) {
-                    this.pid = undefined;
-                    this.updateStatus('stopped');
-                  } else {
-                    this.pid = parseInt(stdout3.trim(), 10);
-                    this.updateStatus('running');
-                  }
-                  resolve(this.pid);
-                });
-                return;
-              }
-              
-              this.pid = parseInt(stdout2.trim(), 10);
-              this.updateStatus('running');
-              resolve(this.pid);
-            });
-            return;
-          }
-          
-          this.pid = parseInt(stdout.trim(), 10);
-          this.updateStatus('running');
-          resolve(this.pid);
-        });
-      });
-    });
+    if (!(await this.checkScreenActive())) {
+      this.pid = undefined;
+      this.updateStatus('stopped');
+      return undefined;
+    }
+
+    const info = await this.tmux.paneInfo(this.screenName);
+    if (!info || isIdleShell(info.currentCommand)) {
+      this.pid = undefined;
+      this.updateStatus('stopped');
+      return undefined;
+    }
+
+    this.pid = info.pid;
+    this.foregroundCommand = info.currentCommand;
+    this.updateStatus('running');
+    return this.pid;
   }
-  
+
   async monitor(): Promise<void> {
-    // First check if screen session still exists
-    const prevStatus = this.status;
     const prevPid = this.pid;
-    const prevScreenActive = this.screenActive;
-    
-    // Check if screen session exists
+    const wasActive = this.screenActive;
+
     await this.checkScreenActive();
-    
-    // If screen was active before but now isn't, log it and update status
-    if (prevScreenActive && !this.screenActive) {
-      logger.info('program', `Screen session ${this.screenName} for program ${this.name} is no longer active`);
+    if (!this.screenActive) {
+      if (wasActive) log.info(`Session ${this.screenName} for program ${this.name} is no longer active`);
       this.pid = undefined;
       this.updateStatus('stopped');
       return;
     }
-    
-    // If screen is not active, program cannot be running
-    if (!this.screenActive) {
-      if (this.status !== 'stopped') {
-        logger.info('program', `Program ${this.name} is marked as stopped because screen ${this.screenName} is not active`);
-        this.pid = undefined;
-        this.updateStatus('stopped');
-      }
-      return;
-    }
-    
-    // Screen is active, check for process
+
     await this.findProcessPid();
-    
-    // If we lost the PID or the status changed to stopped, log it
-    if ((prevPid && !this.pid) || (prevStatus === 'running' && this.status === 'stopped')) {
-      logger.info('program', `Program ${this.name} is no longer running (was PID: ${prevPid})`);
-    }
-    
-    // If we have a PID, double-check it's still valid
-    if (this.pid) {
-      try {
-        // Check if the process is still running
-        process.kill(this.pid, 0);
-        this.updateStatus('running');
-      } catch (error) {
-        logger.info('program', `Process ${this.pid} for ${this.name} is no longer running`);
-        this.pid = undefined;
-        this.updateStatus('stopped');
-        
-        // Check if screen session still exists but process is gone
-        await this.checkScreenActive();
-        if (this.screenActive) {
-          // Screen exists but process is gone, try to find any new process
-          await this.findProcessPid();
-        }
-      }
+    if (prevPid && !this.pid) {
+      log.info(`Program ${this.name} is no longer running (was PID: ${prevPid})`);
     }
   }
-  
+
   async checkScreenActive(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      exec(`screen -list | grep "${this.screenName}"`, (error, stdout) => {
-        const wasActive = this.screenActive;
-        this.screenActive = !error && stdout.includes(this.screenName);
-        
-        if (wasActive !== this.screenActive) {
-          logger.info('program', `Screen session ${this.screenName} active status changed: ${wasActive} -> ${this.screenActive}`);
-        }
-        
-        resolve(this.screenActive);
-      });
-    });
+    const active = await this.tmux.hasSession(this.screenName);
+    this.setScreenActive(active);
+    return active;
   }
-  
+
+  private setScreenActive(active: boolean) {
+    if (this.screenActive !== active) {
+      log.info(`Session ${this.screenName} active status changed: ${this.screenActive} -> ${active}`);
+      this.screenActive = active;
+      this.notifyStatusChange();
+    }
+  }
+
   toJSON(): ProgramConfig {
     return {
       id: this.id,
@@ -458,7 +342,7 @@ export class ProgramManager {
   
   constructor(configPath: string) {
     this.configPath = path.resolve(configPath);
-    logger.info('program', this.configPath);
+    log.info(this.configPath);
 
     this.ensureConfigDir();
   }
@@ -480,25 +364,25 @@ export class ProgramManager {
   
   async loadPrograms(): Promise<void> {
     try {
-      logger.info('program', `Loading programs from config: ${this.configPath}`);
+      log.info(`Loading programs from config: ${this.configPath}`);
       
       if (!fs.existsSync(this.configPath)) {
         // If config doesn't exist yet, create an empty one
-        logger.info('program', `Config file doesn't exist, creating empty config at: ${this.configPath}`);
+        log.info(`Config file doesn't exist, creating empty config at: ${this.configPath}`);
         await this.savePrograms();
         return;
       }
       
       const data = await fs.promises.readFile(this.configPath, 'utf-8');
-      logger.info('program', `Read config data: ${data}`);
+      log.info(`Read config data: ${data}`);
       
       try {
         const configs: ProgramConfig[] = JSON.parse(data);
-        logger.info('program', `Parsed ${configs.length} program configs`);
+        log.info(`Parsed ${configs.length} program configs`);
         
         this.programs.clear();
         for (const config of configs) {
-          logger.info('program', `Creating program from config: ${JSON.stringify(config)}`);
+          log.info(`Creating program from config: ${JSON.stringify(config)}`);
           const program = new Program(config, this.configPath);
           if (this.statusChangeCallback) {
             program.setStatusChangeCallback(this.statusChangeCallback);
@@ -506,13 +390,13 @@ export class ProgramManager {
           this.programs.set(program.id, program);
         }
         
-        logger.info('program', `Loaded ${this.programs.size} programs from config`);
+        log.info(`Loaded ${this.programs.size} programs from config`);
       } catch (parseError) {
-        logger.error('program', 'Error parsing config JSON:', parseError);
+        log.error('Error parsing config JSON:', parseError);
         throw parseError;
       }
     } catch (error) {
-      logger.error('program', 'Error loading programs:', error);
+      log.error('Error loading programs:', error);
     }
   }
   
@@ -520,9 +404,9 @@ export class ProgramManager {
     try {
       const configs = Array.from(this.programs.values()).map(p => p.toJSON());
       await fs.promises.writeFile(this.configPath, JSON.stringify(configs, null, 2));
-      logger.info('program', `Saved ${configs.length} programs to config`);
+      log.info(`Saved ${configs.length} programs to config`);
     } catch (error) {
-      logger.error('program', 'Error saving programs:', error);
+      log.error('Error saving programs:', error);
     }
   }
   
@@ -532,7 +416,7 @@ export class ProgramManager {
   
   getProgramStates(): ProgramState[] {
     const states = this.getPrograms().map(p => p.getState());
-    // logger.info('program', `Getting program states, found ${states.length} programs:`, states);
+    // log.info(`Getting program states, found ${states.length} programs:`, states);
     return states;
   }
   

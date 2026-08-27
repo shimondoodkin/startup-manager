@@ -72,12 +72,16 @@ export class WebSocketServer {
         if (!username || !password || 
             username !== this.authCredentials.username || 
             password !== this.authCredentials.password) {
+          this.recordFailedAuth(ip);
           logWithIP('warn', 'Authentication failed', ip, {
             socketId: socket.id,
             username
           });
           return next(new Error('Authentication failed'));
         }
+        
+        // Successful login clears the failed-attempt counter for this IP
+        delete this.connectionAttempts[ip];
         
         // Log successful authentication
         logWithIP('info', 'Authentication successful', ip, {
@@ -207,6 +211,12 @@ export class WebSocketServer {
         const sent = await cmdProgram.sendCommandToScreen(params.command);
         return { success: sent, state: cmdProgram.getState() };
 
+      case 'getOutput':
+        const outProgram = this.programManager.getProgram(params.id);
+        if (!outProgram) throw new Error(`Program with id ${params.id} not found`);
+        const output = await outProgram.getOutput(params.lines);
+        return { output: output ?? null, state: outProgram.getState() };
+
       case 'listTerminals':
         if (!this.terminalServer) {
           throw new Error('Terminal server not initialized');
@@ -283,38 +293,41 @@ export class WebSocketServer {
     return socket.handshake.address || 'unknown';
   }
   
-  // Rate limiting for authentication attempts (WebSocket logins only)
+  // Rate limiting for authentication attempts (WebSocket logins only).
+  // Only FAILED logins count; a successful login resets the counter. Otherwise
+  // the UI's automatic reconnects (and every page reload) would exhaust the
+  // budget and lock the user out.
   private checkRateLimit(ip: string): boolean {
     const now = Date.now();
-    // Use configuration values for rate limiting
     const windowMs = config.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000;
     const maxAttempts = config.RATE_LIMIT_MAX_REQUESTS;
-    
-    // Initialize tracking for this IP if not exists
-    if (!this.connectionAttempts[ip]) {
-      this.connectionAttempts[ip] = { count: 1, lastAttempt: now };
-      return true;
-    }
-    
+
     const attempt = this.connectionAttempts[ip];
-    
-    // Reset counter if outside window
+    if (!attempt) return true;
+
+    // Window expired - forget the failures
     if (now - attempt.lastAttempt > windowMs) {
-      attempt.count = 1;
-      attempt.lastAttempt = now;
+      delete this.connectionAttempts[ip];
       return true;
     }
-    
-    // Increment counter and check limit
-    attempt.count++;
-    attempt.lastAttempt = now;
-    
+
     // Clean up old entries periodically
     if (Object.keys(this.connectionAttempts).length > 1000) {
       this.cleanupConnectionAttempts(now - windowMs);
     }
-    
-    return attempt.count <= maxAttempts;
+
+    return attempt.count < maxAttempts;
+  }
+
+  private recordFailedAuth(ip: string) {
+    const now = Date.now();
+    const attempt = this.connectionAttempts[ip];
+    if (attempt) {
+      attempt.count++;
+      attempt.lastAttempt = now;
+    } else {
+      this.connectionAttempts[ip] = { count: 1, lastAttempt: now };
+    }
   }
   
   // Clean up old rate limiting entries

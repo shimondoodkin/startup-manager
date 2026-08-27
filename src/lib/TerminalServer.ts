@@ -2,6 +2,16 @@ import { Socket, Namespace } from 'socket.io';
 import * as pty from 'node-pty';
 import { WebSocketServer } from './WebSocketServer';
 import logger, { logWithIP } from './logger';
+import { getTmux } from './tmux';
+
+function tmuxBinary(): string {
+  return process.env.TMUX_PATH || 'tmux';
+}
+
+function defaultShell(): string {
+  if (process.env.SHELL) return process.env.SHELL;
+  return process.platform === 'win32' ? 'powershell.exe' : 'bash';
+}
 
 interface TerminalInstance {
   id: number;
@@ -58,6 +68,7 @@ export class TerminalServer {
 
   // Helper to get foreground process name for a PTY using ps
   private async getForegroundProcessName(pid: number): Promise<string | null> {
+    if (process.platform === 'win32') return null; // `ps --sid` is not available on Windows
     try {
       // Validate pid is a positive integer for security
       if (!Number.isInteger(pid) || pid <= 0) {
@@ -159,6 +170,16 @@ export class TerminalServer {
       term.ptyProcess.write(data.data);
     });
 
+    socket.on('resize', (data: { id: number, cols: number, rows: number }) => {
+      const term = this.terminals.find(t => t.id === data?.id);
+      if (!term || !term.connections.includes(socket)) return;
+      const cols = Math.floor(Number(data.cols)), rows = Math.floor(Number(data.rows));
+      if (!(cols >= 10 && cols <= 500 && rows >= 5 && rows <= 200)) return;
+      try { term.ptyProcess.resize(cols, rows); } catch (err) {
+        logger.warn('pty resize failed', { terminalId: term.id, cols, rows, error: String(err) });
+      }
+    });
+
     socket.on('refresh', (data: { id: number }) => {
       const term = this.terminals.find((t) => t.id === data.id);
       if (!term) {
@@ -197,12 +218,16 @@ export class TerminalServer {
   }
 
   // Create a new terminal (for RPC)
-  public createTerminal({ shell, titleNote }: { shell?: string, titleNote?: string }): TerminalSessionInfo {
+  public createTerminal({ shell, titleNote, attachSession }: { shell?: string, titleNote?: string, attachSession?: string }): TerminalSessionInfo {
     const terminalId = this.nextTerminalId++;
     let command: string[];
     
     // Validate and sanitize inputs
-    if (shell) {
+    if (attachSession) {
+      // Attach the web terminal to a program's tmux session.
+      getTmux().validateSessionName(attachSession);
+      command = [tmuxBinary(), 'attach-session', '-t', `=${attachSession}`];
+    } else if (shell) {
       // Security check for dangerous commands
       if (typeof shell !== 'string') {
         logger.warn('Invalid shell command type', { type: typeof shell });
@@ -226,19 +251,19 @@ export class TerminalServer {
       
       if (command.length === 0 || typeof command[0] !== 'string') {
         logger.warn('Invalid shell command after parsing', { shell, parsed: command });
-        command = ['bash']; // Default to bash if parsing fails
+        command = [defaultShell()]; // Default shell if parsing fails
       }
     } else {
-      command = ['bash'];
+      command = [defaultShell()];
     }
     
     // Log terminal creation
     logger.info('Creating new terminal', { terminalId, command: command[0] });
     const ptyProcess = pty.spawn(command[0], command.slice(1), {
-      name: 'xterm-color',
+      name: 'xterm-256color',
       cols: 80,
       rows: 30,
-      cwd: process.env.HOME,
+      cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
       env: process.env as { [key: string]: string }
     });
     const buffer: string[] = [];

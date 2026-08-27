@@ -7,6 +7,7 @@ module.exports = {
     '^.+\\.(ts|tsx)$': 'ts-jest',
   },
   testMatch: ['**/__tests__/**/*.ts?(x)', '**/?(*.)+(spec|test).ts?(x)'],
+  testPathIgnorePatterns: ['/node_modules/', '/e2e/', '/dist/'],
   moduleNameMapper: {
     // Handle module aliases (if you have them in tsconfig.json)
     '^@/(.*)$': '<rootDir>/src/$1',

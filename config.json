@@ -1,20 +1,20 @@
 [
   {
-    "id": "96dc0fc1-2cc8-43a7-857d-80d8bc954f7a",
-    "name": "nano",
-    "command": "nano test.txt",
-    "screenName": "nano",
+    "id": "0a4a1c2e-0000-4000-8000-000000000001",
+    "name": "hello-loop",
+    "command": "while true; do date; sleep 5; done",
+    "screenName": "hello-loop",
     "maxChildDepth": 1,
     "autoStart": false,
-    "stopMethod": "SIGHUP"
+    "stopMethod": "CTRL_C"
   },
   {
-    "id": "015e22ac-f118-4b0d-8869-4d551c6af3f8",
-    "name": "nano2",
-    "command": "nano test2.txt aaaa",
-    "screenName": "nano2",
+    "id": "0a4a1c2e-0000-4000-8000-000000000002",
+    "name": "status-export",
+    "command": "while true; do npm run --silent sm-export -- status/startup.json; sleep 60; done",
+    "screenName": "status-export",
     "maxChildDepth": 1,
     "autoStart": false,
-    "stopMethod": "SIGHUP"
+    "stopMethod": "CTRL_C"
   }
 ]

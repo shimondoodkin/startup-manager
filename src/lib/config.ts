@@ -61,7 +61,7 @@ export const getConfig = (): Config => {
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'password',
     ALLOWED_ORIGINS: parseArray(process.env.ALLOWED_ORIGINS, ['http://localhost:3000']),
     RATE_LIMIT_WINDOW_MINUTES: parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES || '15', 10), // 15 minutes
-    RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '5', 10),
+    RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '20', 10),
 
     // Logging
     LOG_LEVEL: (process.env.LOG_LEVEL as Config['LOG_LEVEL']) || 'info',
