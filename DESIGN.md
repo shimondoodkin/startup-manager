@@ -144,7 +144,7 @@ The application is highly configurable through environment variables:
 - Logging settings (level, file output)
 - Program settings (config path, limits)
 
-A `.env.example` file is provided as a template.
+`.env.example.linux` and `.env.example.windows` are provided as templates.
 
 ## 7. Deployment Considerations
 
@@ -158,7 +158,7 @@ A `.env.example` file is provided as a template.
 
 1. Clone the repository
 2. Install dependencies with `npm install`
-3. Copy `.env.example` to `.env` and configure
+3. Copy `.env.example.linux` (or `.env.example.windows`) to `.env` and configure
 4. Build the application with `npm run build`
 5. Start the server with `npm start`
 

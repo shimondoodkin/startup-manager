@@ -30,7 +30,7 @@ auth, and a hard dependency on the manager being up. Instead, split it:
    ```
 
    Register it like any other program (see `status-export` in the repo's
-   sample [`config.json`](../../config.json)), or via smctl:
+   sample [`config.linux.json`](../../config.linux.json)), or via smctl:
 
    ```bash
    npm run smctl -- add status-export 'while true; do npm run --silent sm-export -- status/startup.json; sleep 60; done'

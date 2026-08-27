@@ -1,0 +1,29 @@
+[
+  {
+    "id": "0a4a1c2e-0000-4000-8000-000000000001",
+    "name": "hello-loop",
+    "command": "while true; do date; ping -n 6 127.0.0.1 >/dev/null; done",
+    "screenName": "hello-loop",
+    "maxChildDepth": 1,
+    "autoStart": false,
+    "stopMethod": "CTRL_C"
+  },
+  {
+    "id": "0a4a1c2e-0000-4000-8000-000000000002",
+    "name": "status-export",
+    "command": "while true; do npm run --silent sm-export -- status/startup.json; ping -n 61 127.0.0.1 >/dev/null; done",
+    "screenName": "status-export",
+    "maxChildDepth": 1,
+    "autoStart": false,
+    "stopMethod": "CTRL_C"
+  },
+  {
+    "id": "0a4a1c2e-0000-4000-8000-000000000003",
+    "name": "powershell-job",
+    "command": "/cygdrive/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -File C:/jobs/run.ps1",
+    "screenName": "powershell-job",
+    "maxChildDepth": 1,
+    "autoStart": false,
+    "stopMethod": "CTRL_C"
+  }
+]

@@ -14,6 +14,12 @@ if ! command -v tmux >/dev/null 2>&1 && [ -z "${TMUX_PATH:-}" ]; then
     exit 1
 fi
 
+if [ ! -f .env ]; then
+    echo "No .env found - creating one from .env.example.linux."
+    echo "    Set ADMIN_USERNAME/ADMIN_PASSWORD before exposing this server."
+    cp .env.example.linux .env
+fi
+
 if [ ! -d node_modules ]; then
     echo "[1/3] Installing dependencies..."
     npm install

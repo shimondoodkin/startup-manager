@@ -5,6 +5,12 @@ if "%~1"=="--wait-open" goto :waitopen
 
 echo === Startup Manager ===
 
+if not exist .env (
+    echo No .env found - creating one from .env.example.windows.
+    echo     Set ADMIN_USERNAME/ADMIN_PASSWORD before exposing this server.
+    copy /y .env.example.windows .env >nul
+)
+
 if not exist node_modules (
     echo [1/3] Installing dependencies...
     call npm install

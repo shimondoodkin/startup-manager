@@ -4,6 +4,12 @@
 *.sh text eol=lf
 *.service text eol=lf
 
+# Platform templates ship with the endings native to the platform they document.
+.env.example.linux text eol=lf
+config.linux.json text eol=lf
+.env.example.windows text eol=crlf
+config.windows.json text eol=crlf
+
 # Windows launchers must keep CRLF.
 *.bat text eol=crlf
 *.cmd text eol=crlf

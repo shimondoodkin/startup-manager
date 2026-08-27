@@ -36,17 +36,35 @@ cd startup-manager
 npm install
 ```
 
-3. Create a `.env` file in the project root with the following variables:
+3. Create a `.env` from the template for your platform, then set at least
+   `ADMIN_USERNAME` and `ADMIN_PASSWORD`:
 
+```bash
+cp .env.example.linux .env          # Linux / macOS
 ```
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=yourSecurePassword
-CONFIG_PATH=/path/to/config/directory/programs.json
-PORT=3000
-# Linux/macOS: leave TMUX_PATH unset to use the tmux on PATH.
-# Windows only: path to a Cygwin/MSYS tmux.exe
-TMUX_PATH=C:/ProgramFilesFolder/itmux/bin/tmux.exe
+
+```bat
+copy .env.example.windows .env      :: Windows
 ```
+
+   Each template documents only the settings that apply to that platform - the
+   Linux one leaves tmux alone, the Windows one covers `TMUX_PATH` and the
+   Cygwin session shell. `./start-manager.sh`, `start-manager.bat` and
+   `install-tmux.bat` all create the right one for you when `.env` is missing.
+
+4. Optionally seed a program list. `config.linux.json` and
+   `config.windows.json` are working examples - point `CONFIG_PATH` at a copy:
+
+```bash
+cp config.linux.json programs.json  # Linux / macOS
+```
+
+```bat
+copy config.windows.json programs.json   :: Windows
+```
+
+   The two differ because itmux ships no `sleep`: the Windows example polls
+   with `ping -n N 127.0.0.1` instead, and adds a PowerShell job.
 
 ### Linux notes
 
@@ -86,8 +104,9 @@ TMUX_PATH=C:/ProgramFilesFolder/itmux/bin/tmux.exe
   `tar`, `ssh` and `nano` - but **no `sleep`**, so a poll loop written as
   `while true; do work; sleep 60; done` fails on Windows with
   `bash: sleep: command not found`. Use `ping -n 61 127.0.0.1 >/dev/null` in its
-  place, or install full Cygwin and point `TMUX_PATH` at its `tmux.exe`. The
-  sample commands in `config.json` use `sleep` and are Linux-only as written.
+  place, or install full Cygwin and point `TMUX_PATH` at its `tmux.exe`.
+  `config.windows.json` already does this; `config.linux.json` uses `sleep` and
+  is Linux-only as written.
 - Stop always sends Ctrl+C to the session (POSIX signals are not available).
 - `node-pty` ships prebuilt binaries for Windows; no Visual Studio needed.
 

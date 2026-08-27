@@ -6,7 +6,7 @@
     "screenName": "hello-loop",
     "maxChildDepth": 1,
     "autoStart": false,
-    "stopMethod": "CTRL_C"
+    "stopMethod": "SIGINT"
   },
   {
     "id": "0a4a1c2e-0000-4000-8000-000000000002",

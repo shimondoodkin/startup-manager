@@ -121,7 +121,7 @@ if ($LASTEXITCODE -ne 0) { throw "$($tmux.FullName) -V failed: $version" }
 Write-Host "OK: $version" -ForegroundColor Green
 
 # startup-manager reads TMUX_PATH with forward slashes; both work, but this is
-# what .env.example documents and what the logs will show.
+# what .env.example.windows documents and what the logs will show.
 $tmuxPath = $tmux.FullName.Replace('\', '/')   # .Replace, not -replace: the operand is a literal, not a regex
 
 # --- point .env at it --------------------------------------------------------
@@ -133,11 +133,11 @@ if ($SkipEnvUpdate) {
 }
 
 $envFile = Join-Path $PSScriptRoot '.env'
-$sample  = Join-Path $PSScriptRoot '.env.example'
+$sample  = Join-Path $PSScriptRoot '.env.example.windows'
 if (-not (Test-Path -LiteralPath $envFile)) {
     if (Test-Path -LiteralPath $sample) {
         Copy-Item -LiteralPath $sample -Destination $envFile
-        Write-Host 'Created .env from .env.example - set ADMIN_USERNAME/ADMIN_PASSWORD before exposing the server.' -ForegroundColor Yellow
+        Write-Host 'Created .env from .env.example.windows - set ADMIN_USERNAME/ADMIN_PASSWORD before exposing the server.' -ForegroundColor Yellow
     } else {
         New-Item -ItemType File -Path $envFile | Out-Null
         Write-Host 'Created an empty .env.'
