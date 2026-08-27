@@ -46,3 +46,6 @@ next-env.d.ts
 
 .env
 /logs
+
+# tmux bundle fetched by install-tmux.ps1
+/tools

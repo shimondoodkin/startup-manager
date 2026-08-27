@@ -13,6 +13,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
 import config from './lib/config';
+import { getTmux } from './lib/tmux';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'startup-manager.server8.doodkin.com';
@@ -157,6 +158,20 @@ async function start() {
   port = address.port; // Update the port variable with the actual port used
   logger.info(`Server started`, { port, hostname, env: process.env.NODE_ENV });
 
+  // Preflight: every program operation goes through the tmux CLI, so say so
+  // loudly once at boot rather than failing silently on each start/stop.
+  const tmuxVersion = await getTmux().version();
+  if (tmuxVersion) {
+    logger.info(`tmux available: ${tmuxVersion}`, { category: 'tmux' });
+  } else {
+    logger.error(
+      process.platform === 'win32'
+        ? 'tmux not found. Install a Cygwin/MSYS tmux and point TMUX_PATH at its tmux.exe.'
+        : 'tmux not found on PATH. Install it (apt install tmux / dnf install tmux) or set TMUX_PATH.',
+      { category: 'tmux' }
+    );
+  }
+
   // Create namespaces for different services
   const programsNamespace = io.of('/');
 
@@ -185,13 +200,15 @@ async function start() {
     // }
   });
 
-  // Handle shutdown
+  // Handle shutdown. SIGINT is Ctrl+C in a terminal; SIGTERM is what systemd,
+  // Docker and `kill` send on Linux, so both must shut down gracefully or
+  // `systemctl stop` just kills the process mid-write.
   let shuttingDown = false;
-  process.on('SIGINT', async () => {
+  const shutdown = async (signal: string) => {
     try {
       if (shuttingDown) return;
       shuttingDown = true;
-      logger.info('Shutting down gracefully...');
+      logger.info(`Shutting down gracefully (${signal})...`);
 
       // Close all file watchers
       const getActiveHandles = (process as any)._getActiveHandles as () => any[];
@@ -230,7 +247,10 @@ async function start() {
       logger.error('Error shutting down server:', { error: e.stack });
       process.exit(1);
     }
-  });
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  if (process.platform !== 'win32') process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 start();

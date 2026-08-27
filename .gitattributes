@@ -1,0 +1,10 @@
+# Files Linux executes must keep LF endings, whoever commits them: a CRLF
+# shebang gives "bad interpreter: /usr/bin/env bash^M". The rest of the tree is
+# deliberately left alone so this does not renormalise existing files.
+*.sh text eol=lf
+*.service text eol=lf
+
+# Windows launchers must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Tmux, getTmux } from './tmux';
+import { signalForeground } from './signals';
 import logger from './logger';
 
 /** Program-category logger: `log.info(msg, extra?)` -> logger with category metadata. */
@@ -193,8 +194,10 @@ export class Program extends EventEmitter {
         }
       }
 
-      log.info(`Sending ${this.stopMethod} to process ${this.pid}`);
-      process.kill(this.pid!, this.stopMethod);
+      // this.pid is the pane's *shell*; the signal has to go to the terminal's
+      // foreground process group or bash just swallows it. See ./signals.
+      const target = await signalForeground(this.pid!, this.stopMethod);
+      log.info(`Sent ${this.stopMethod} to ${target} (pane shell ${this.pid})`);
       return this.waitForStop('signal');
     } catch (error) {
       log.error(`Error stopping program ${this.name}:`, error);

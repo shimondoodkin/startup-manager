@@ -66,6 +66,34 @@ describe('Tmux', () => {
     finally { Object.defineProperty(process, 'platform', { value: orig }); }
   });
 
+  it('puts the bundle bin dir on PATH for the session shell on Windows', async () => {
+    const orig = process.platform;
+    const origPath = process.env.PATH;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    process.env.PATH = 'C:\\Windows\\System32';
+    try {
+      mockResult('');
+      await new Tmux('C:\\tools\\itmux\\bin\\tmux.exe').newSession('abc');
+      // bash.exe --norc inherits this verbatim, so date/sleep/grep must be on it.
+      expect(execFileMock.mock.calls[0][2].env.PATH).toBe('C:\\tools\\itmux\\bin;C:\\Windows\\System32');
+    } finally {
+      process.env.PATH = origPath;
+      Object.defineProperty(process, 'platform', { value: orig });
+    }
+  });
+
+  it('inherits the environment unchanged off Windows', async () => {
+    const orig = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      mockResult('');
+      await new Tmux('tmux').newSession('abc');
+      expect(execFileMock.mock.calls[0][2].env).toBeUndefined();
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig });
+    }
+  });
+
   it('toCygwinPath converts drive paths', () => {
     expect(toCygwinPath('C:\\a\\b.exe')).toBe('/cygdrive/c/a/b.exe');
     expect(toCygwinPath('D:/x/y')).toBe('/cygdrive/d/x/y');

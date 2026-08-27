@@ -8,9 +8,19 @@ function tmuxBinary(): string {
   return process.env.TMUX_PATH || 'tmux';
 }
 
+/**
+ * Shell used by the web terminal's "new terminal" button.
+ *
+ * On Linux/macOS this is the user's own login shell ($SHELL), falling back to
+ * bash. On Windows $SHELL is ignored unless it names a Windows executable:
+ * launching the server from Git Bash or Cygwin exports a POSIX path such as
+ * /usr/bin/bash, which node-pty (a native Win32 process) cannot spawn.
+ */
 function defaultShell(): string {
-  if (process.env.SHELL) return process.env.SHELL;
-  return process.platform === 'win32' ? 'powershell.exe' : 'bash';
+  const fromEnv = process.env.SHELL;
+  if (process.platform !== 'win32') return fromEnv || 'bash';
+  if (fromEnv && !fromEnv.startsWith('/')) return fromEnv;
+  return 'powershell.exe';
 }
 
 interface TerminalInstance {

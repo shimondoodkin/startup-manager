@@ -35,12 +35,31 @@ const fakeTmux = {
 };
 
 jest.mock('./tmux', () => ({ getTmux: () => fakeTmux, Tmux: jest.fn() }));
+
+// Signals go to the pane's foreground process group, not the pane shell (see ./signals).
+const signalForeground = jest.fn(async (panePid: number, signal: string) => {
+  const s = [...sessions.values()].find((x) => x.pid === panePid);
+  if (s) s.foreground = 'bash'; // the job dies, leaving the idle shell behind
+  return `process group ${panePid + 1}`;
+});
+jest.mock('./signals', () => ({ signalForeground: (...a: any[]) => (signalForeground as any)(...a) }));
 jest.mock('tree-kill', () => jest.fn((pid, signal, cb) => cb(null)));
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'mock-uuid') }));
 jest.mock('./logger', () => ({ __esModule: true, default: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() } }));
 
 // Speed up the stop/start polling delays.
 jest.spyOn(global, 'setTimeout').mockImplementation(((fn: any) => { fn(); return 0 as any; }) as any);
+
+/** Run `fn` as if on Linux, so the POSIX-signal paths are exercised on any host. */
+async function onLinux(fn: () => Promise<void>): Promise<void> {
+  const orig = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  try {
+    await fn();
+  } finally {
+    Object.defineProperty(process, 'platform', orig);
+  }
+}
 
 describe('isIdleShell', () => {
   it('recognises idle shells', () => {
@@ -141,6 +160,28 @@ describe('Program', () => {
     it('returns false when there is no session', async () => {
       program.stopMethod = 'CTRL_C';
       expect(await program.stop()).toBe(false);
+    });
+
+    it('signals the foreground process group, not the pane shell', async () => {
+      await onLinux(async () => {
+        program.stopMethod = 'SIGINT';
+        await program.start();
+        const panePid = sessions.get('test-session')!.pid;
+        expect(await program.stop()).toBe(true);
+        expect(signalForeground).toHaveBeenCalledWith(panePid, 'SIGINT');
+        expect(sessions.get('test-session')!.ctrlC).toBe(0); // no Ctrl+C fallback needed
+        expect(program.getState()).toMatchObject({ status: 'stopped', screenActive: true });
+      });
+    });
+
+    it('falls back to Ctrl+C when the session has no running program', async () => {
+      await onLinux(async () => {
+        program.stopMethod = 'SIGHUP';
+        await program.startScreen(); // session exists, but nothing is running in it
+        expect(await program.stop()).toBe(true);
+        expect(signalForeground).not.toHaveBeenCalled();
+        expect(sessions.get('test-session')!.ctrlC).toBe(1);
+      });
     });
 
     it('falls back to Ctrl+C on Windows regardless of stopMethod', async () => {

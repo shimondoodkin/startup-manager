@@ -13,7 +13,7 @@
  *   smctl kill <name|id>            kill the whole tmux session
  *   smctl logs <name|id> [-n N]     print the last N lines of output (default 200)
  *   smctl send <name|id> <text...>  type text into the session and press Enter
- *   smctl add <name> <command> [--session s] [--autostart]
+ *   smctl add <name> <command> [--session s] [--autostart] [--stop METHOD]
  *   smctl rm <name|id>
  *   smctl autostart <name|id> on|off
  *   smctl session <name|id>         start the session without running the command
@@ -154,7 +154,15 @@ async function main() {
         const sIdx = rest.indexOf('--session');
         const screenName = sIdx >= 0 ? rest[sIdx + 1] : name.replace(/[^A-Za-z0-9_-]/g, '-');
         const autoStart = rest.includes('--autostart');
-        const r = await rpc(socket, 'addProgram', { name, command, screenName, autoStart, stopMethod: 'CTRL_C' });
+        // Ctrl+C is the portable default - the only thing that works on Windows.
+        // On Linux/macOS, --stop SIGINT|SIGHUP signals the foreground process group instead.
+        const mIdx = rest.indexOf('--stop');
+        const stopMethod = mIdx >= 0 ? String(rest[mIdx + 1] || '').toUpperCase() : 'CTRL_C';
+        if (!['CTRL_C', 'SIGINT', 'SIGHUP'].includes(stopMethod)) {
+          console.error(`unknown --stop ${stopMethod}: expected CTRL_C, SIGINT or SIGHUP`);
+          process.exit(1);
+        }
+        const r = await rpc(socket, 'addProgram', { name, command, screenName, autoStart, stopMethod });
         console.log(`added ${r.name} (${r.id}) session=${r.screenName}`);
         break;
       }
